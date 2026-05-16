@@ -18,7 +18,7 @@ class DashboardKPIResponse(BaseModel):
 
 class MaterialTableRow(BaseModel):
     material_code: str
-    material_description: str
+    material_description: Optional[str]
     vendor: Optional[str]
     current_stock: Optional[float] = 0
     coverage_days: Optional[float] = 0
@@ -30,5 +30,3 @@ class MaterialTableRow(BaseModel):
 class DashboardTableResponse(BaseModel):
     items: List[MaterialTableRow]
     total: int
-    page: int
-    size: int

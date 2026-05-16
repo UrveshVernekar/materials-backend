@@ -18,8 +18,6 @@ def get_table(
     status: str = Query(None),
     min_coverage: float = Query(None),
     max_coverage: float = Query(None),
-    page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db)
 ):
     filters = MaterialFilter(
@@ -27,8 +25,6 @@ def get_table(
         vendor=vendor, 
         status=status,
         min_coverage=min_coverage, 
-        max_coverage=max_coverage,
-        page=page, 
-        size=size
+        max_coverage=max_coverage
     )
     return get_dashboard_table(db, filters)

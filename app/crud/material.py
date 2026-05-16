@@ -88,14 +88,11 @@ def get_filtered_materials(db: Session, filters: MaterialFilter):
     count_query = text(f"SELECT COUNT(*) FROM ({base_query}) as sub")
     total = db.execute(count_query, params).scalar()
 
-    # Paginated data
+    # Return all data
     base_query += " ORDER BY coverage_days ASC, material_code"
-    base_query += " LIMIT :limit OFFSET :offset"
-    params['limit'] = filters.size
-    params['offset'] = (filters.page - 1) * filters.size
-
+    
     result = db.execute(text(base_query), params).fetchall()
 
     items = [dict(row._mapping) for row in result]
 
-    return {"items": items, "total": total or 0, "page": filters.page, "size": filters.size}
+    return {"items": items, "total": total or 0}

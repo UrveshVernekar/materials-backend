@@ -1,8 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-def get_aging_inventory(db: Session, page: int = 1, size: int = 50, search: str = None):
-    params = {"limit": size, "offset": (page - 1) * size}
+def get_aging_inventory(db: Session, search: str = None):
+    params = {}
     
     base_query = """
         FROM materials
@@ -39,21 +39,18 @@ def get_aging_inventory(db: Session, page: int = 1, size: int = 50, search: str 
             END as status
         {base_query}
         ORDER BY locked_capital DESC NULLS LAST
-        LIMIT :limit OFFSET :offset
     """
     items = [dict(row._mapping) for row in db.execute(text(list_query), params).fetchall()]
     
     return {
         "kpis": dict(kpis._mapping) if kpis else {},
         "items": items,
-        "total": kpis.total_aging_items if kpis else 0,
-        "page": page,
-        "size": size
+        "total": kpis.total_aging_items if kpis else 0
     }
 
 
-def get_inventory_distribution(db: Session, page: int = 1, size: int = 50, search: str = None):
-    params = {"limit": size, "offset": (page - 1) * size}
+def get_inventory_distribution(db: Session, search: str = None):
+    params = {}
     
     base_query = """
         FROM materials
@@ -91,14 +88,11 @@ def get_inventory_distribution(db: Session, page: int = 1, size: int = 50, searc
             END as balance_status
         {base_query}
         ORDER BY total_stock DESC NULLS LAST
-        LIMIT :limit OFFSET :offset
     """
     items = [dict(row._mapping) for row in db.execute(text(list_query), params).fetchall()]
     
     return {
         "kpis": dict(kpis._mapping) if kpis else {},
         "items": items,
-        "total": kpis.total_items_with_stock if kpis else 0,
-        "page": page,
-        "size": size
+        "total": kpis.total_items_with_stock if kpis else 0
     }
