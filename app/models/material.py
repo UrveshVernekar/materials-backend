@@ -16,10 +16,10 @@ class Material(Base):
     status = Column(String(50))  # Running, New, Obsolete, Slow
     
     # Stock and tracking fields
-    gpc_stk_22_04 = Column(Numeric(12, 2))
-    gpc_free_stk_22_04 = Column(Numeric(12, 2))
-    branch_stk_22_04 = Column(Numeric(12, 2))
-    po_balance_22_04 = Column(Numeric(12, 2))
+    gpc_stk = Column(Numeric(12, 2))
+    gpc_free_stk = Column(Numeric(12, 2))
+    branch_stk = Column(Numeric(12, 2))
+    po_balance = Column(Numeric(12, 2))
     
     # ... Add others as needed for KPIs
     created_at = Column(DateTime(timezone=True), server_default=func.now())

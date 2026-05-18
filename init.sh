@@ -49,4 +49,4 @@ echo "✨ Setup complete! Spinning up containers..."
 echo "------------------------------------------------"
 
 # 5. Automatically run the app using the new group context (avoids needing a reboot)
-sg docker -c "docker compose up --build"
+docker compose up --build

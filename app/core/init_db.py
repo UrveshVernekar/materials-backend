@@ -7,6 +7,8 @@ def init_db():
         material_id SERIAL PRIMARY KEY,
         material_code VARCHAR(50) UNIQUE NOT NULL,
         material_description TEXT,
+        product_category VARCHAR(200) DEFAULT NULL,
+        product_status VARCHAR(100) DEFAULT NULL,
         vendor VARCHAR(200),
         machine_population BIGINT,
         last_production_year INT,
@@ -18,12 +20,12 @@ def init_db():
         price NUMERIC(12,2),
         moq INT,
         cov_in_days NUMERIC,
-        branch_pend_22_04 NUMERIC,
+        branch_pend NUMERIC,
         no_trace_damage NUMERIC,
-        po_balance_22_04 NUMERIC,
-        gpc_stk_22_04 NUMERIC,
-        gpc_free_stk_22_04 NUMERIC,
-        branch_stk_22_04 NUMERIC,
+        po_balance NUMERIC,
+        gpc_stk NUMERIC,
+        gpc_free_stk NUMERIC,
+        branch_stk NUMERIC,
         for_1_day_req NUMERIC,
         stk_in_alt_part NUMERIC,
         req_on_12m_avg NUMERIC,
@@ -53,16 +55,6 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_monthly_material ON material_monthly_data(material_code);
     CREATE INDEX IF NOT EXISTS idx_monthly_date ON material_monthly_data(year, month);
 
-    CREATE TABLE IF NOT EXISTS material_summary (
-        material_code VARCHAR(50) PRIMARY KEY REFERENCES materials(material_code),
-        three_m_av NUMERIC,
-        three_m_max NUMERIC,
-        three_m_mean NUMERIC,
-        twelve_m_max NUMERIC,
-        twelve_m_av NUMERIC,
-        twelve_m_mean NUMERIC,
-        last_updated TIMESTAMPTZ DEFAULT NOW()
-    );
     """
     
     with engine.begin() as conn:

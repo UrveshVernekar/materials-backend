@@ -54,7 +54,7 @@ def get_inventory_distribution(db: Session, search: str = None):
     
     base_query = """
         FROM materials
-        WHERE COALESCE(gpc_stk_22_04, 0) > 0 OR COALESCE(branch_stk_22_04, 0) > 0
+        WHERE COALESCE(gpc_stk, 0) > 0 OR COALESCE(branch_stk, 0) > 0
     """
     
     if search:
@@ -65,10 +65,10 @@ def get_inventory_distribution(db: Session, search: str = None):
     kpi_query = f"""
         SELECT 
             COUNT(*) as total_items_with_stock,
-            SUM(COALESCE(gpc_stk_22_04, 0)) as total_central_stock,
-            SUM(COALESCE(branch_stk_22_04, 0)) as total_branch_stock,
-            COUNT(CASE WHEN COALESCE(gpc_stk_22_04, 0) = 0 AND COALESCE(branch_stk_22_04, 0) > 0 THEN 1 END) as branch_heavy_items,
-            COUNT(CASE WHEN COALESCE(branch_stk_22_04, 0) = 0 AND COALESCE(gpc_stk_22_04, 0) > 0 THEN 1 END) as central_heavy_items
+            SUM(COALESCE(gpc_stk, 0)) as total_central_stock,
+            SUM(COALESCE(branch_stk, 0)) as total_branch_stock,
+            COUNT(CASE WHEN COALESCE(gpc_stk, 0) = 0 AND COALESCE(branch_stk, 0) > 0 THEN 1 END) as branch_heavy_items,
+            COUNT(CASE WHEN COALESCE(branch_stk, 0) = 0 AND COALESCE(gpc_stk, 0) > 0 THEN 1 END) as central_heavy_items
         {base_query}
     """
     kpis = db.execute(text(kpi_query), params).fetchone()
@@ -78,12 +78,12 @@ def get_inventory_distribution(db: Session, search: str = None):
         SELECT 
             material_code,
             material_description,
-            COALESCE(gpc_stk_22_04, 0) as central_stock,
-            COALESCE(branch_stk_22_04, 0) as branch_stock,
-            COALESCE(gpc_stk_22_04, 0) + COALESCE(branch_stk_22_04, 0) as total_stock,
+            COALESCE(gpc_stk, 0) as central_stock,
+            COALESCE(branch_stk, 0) as branch_stock,
+            COALESCE(gpc_stk, 0) + COALESCE(branch_stk, 0) as total_stock,
             CASE 
-                WHEN COALESCE(gpc_stk_22_04, 0) = 0 AND COALESCE(branch_stk_22_04, 0) > 0 THEN 'Imbalanced (Branch Heavy)'
-                WHEN COALESCE(branch_stk_22_04, 0) = 0 AND COALESCE(gpc_stk_22_04, 0) > 0 THEN 'Imbalanced (Central Heavy)'
+                WHEN COALESCE(gpc_stk, 0) = 0 AND COALESCE(branch_stk, 0) > 0 THEN 'Imbalanced (Branch Heavy)'
+                WHEN COALESCE(branch_stk, 0) = 0 AND COALESCE(gpc_stk, 0) > 0 THEN 'Imbalanced (Central Heavy)'
                 ELSE 'Balanced'
             END as balance_status
         {base_query}

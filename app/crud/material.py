@@ -38,15 +38,31 @@ def get_dashboard_kpis(db: Session):
 
 def get_filtered_materials(db: Session, filters: MaterialFilter):
     base_query = """
-        WITH material_data AS (
+        WITH latest_months AS (
+            SELECT 
+                material_code, 
+                consumption,
+                ROW_NUMBER() OVER(PARTITION BY material_code ORDER BY year DESC, month DESC) as rn
+            FROM material_monthly_data
+            WHERE consumption IS NOT NULL
+        ),
+        calc_summary AS (
+            SELECT 
+                material_code,
+                ROUND(AVG(CASE WHEN rn <= 3 THEN consumption END)::numeric, 2) as three_m_avg,
+                ROUND(AVG(CASE WHEN rn <= 12 THEN consumption END)::numeric, 2) as twelve_m_avg
+            FROM latest_months
+            GROUP BY material_code
+        ),
+        material_data AS (
             SELECT 
                 m.material_code,
                 m.material_description,
                 m.vendor,
-                COALESCE(m.gpc_free_stk_22_04 + m.branch_stk_22_04, 0) as current_stock,
+                COALESCE(m.gpc_free_stk + m.branch_stk, 0) as current_stock,
                 m.cov_in_days as coverage_days,
-                s.three_m_av as three_m_avg,
-                s.twelve_m_mean as twelve_m_avg,
+                s.three_m_avg,
+                s.twelve_m_avg,
                 m.price,
                 CASE 
                     WHEN m.inh_s_obslte = 'OBSOLETE' THEN 'Obsolete'
@@ -54,7 +70,7 @@ def get_filtered_materials(db: Session, filters: MaterialFilter):
                     ELSE 'Running' 
                 END as status
             FROM materials m
-            LEFT JOIN material_summary s ON m.material_code = s.material_code
+            LEFT JOIN calc_summary s ON m.material_code = s.material_code
         )
         SELECT * FROM material_data
         WHERE 1=1

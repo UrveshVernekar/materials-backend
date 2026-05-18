@@ -88,13 +88,7 @@ materials_df.rename(columns={
     'average': 'average',
     'aginge more than 120 days': 'aging_more_than_120_days',
     'blocked code in Aging': 'blocked_code_in_aging',
-    'remarks': 'remarks',
-    '3 M av': 'three_m_av',
-    '3 m max': 'three_m_max',
-    '3 m mean': 'three_m_mean',
-    '12 m MAX': 'twelve_m_max',
-    '12 M AV': 'twelve_m_av',
-    '12 m mean': 'twelve_m_mean'
+    'remarks': 'remarks'
 }, inplace=True)
 
 # ================== 2. MONTHLY DATA ==================
@@ -118,15 +112,10 @@ for _, row in df.iterrows():
                 'consumption': float(value)
             })
 
-# ================== 3. SUMMARY ==================
-summary_df = df[['Material', '3 M av', '3 m max', '3 m mean', '12 m MAX', '12 M AV', '12 m mean']].copy()
-summary_df.rename(columns={'Material': 'material_code'}, inplace=True)
-
 # ================== 4. DATABASE INSERTION (SAFE ORDER) ==================
 print("Inserting data into database...")
 monthly_df = pd.DataFrame(monthly_records)
 monthly_df.to_sql('material_monthly_data', engine, if_exists='replace', index=False)
-summary_df.to_sql('material_summary', engine, if_exists='replace', index=False)
 materials_df.to_sql('materials', engine, if_exists='replace', index=False)
 
 print(f"Inserted {len(materials_df)} materials and {len(monthly_df)} monthly records.")
