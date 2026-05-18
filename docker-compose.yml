@@ -1,0 +1,37 @@
+# version: '3.8'
+
+services:
+  # Database Service
+  db:
+    image: postgres:15-alpine
+    container_name: gdc_postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres_user
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_DB: gdc_materials_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # FastAPI Web Application Service
+  web:
+    build: .
+    container_name: gdc_fastapi_web
+    restart: always
+    # This matches the uvicorn string you ran earlier
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    dns:              
+      - 8.8.8.8
+    environment:
+      - DATABASE_URL=postgresql://postgres_user:postgres_password@db:5432/gdc_materials_db
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
