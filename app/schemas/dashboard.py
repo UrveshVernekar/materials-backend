@@ -20,8 +20,12 @@ class MaterialTableRow(BaseModel):
     material_code: str
     material_description: Optional[str]
     vendor: Optional[str]
+    machine_population: Optional[float] = 0
     current_stock: Optional[float] = 0
     coverage_days: Optional[float] = 0
+    lead_time: Optional[float] = 0
+    delta: Optional[float] = 0
+    total_lead_time: Optional[float] = 0
     three_m_avg: Optional[float] = 0
     twelve_m_avg: Optional[float] = 0
     price: Optional[float]
