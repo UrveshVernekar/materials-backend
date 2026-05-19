@@ -19,6 +19,8 @@ def init_db():
         alt VARCHAR(50),
         price NUMERIC(12,2),
         moq INT,
+        lead_time INT DEFAULT 0,
+        delta INT DEFAULT 0,
         cov_in_days NUMERIC,
         branch_pend NUMERIC,
         no_trace_damage NUMERIC,

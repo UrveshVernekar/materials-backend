@@ -10,6 +10,8 @@ class Material(Base):
     vendor = Column(String(200))
     machine_population = Column(Integer)
     last_production_year = Column(Integer)
+    lead_time = Column(Numeric)
+    delta = Column(Numeric)
     price = Column(Numeric(12, 2))
     moq = Column(Integer)
     cov_in_days = Column(Numeric)

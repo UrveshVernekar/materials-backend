@@ -178,6 +178,16 @@ SCHEMA_FIELDS = {
         "minimum order quantity"
     ],
 
+    "lead_time": [
+        "lead time",
+        "lead time days"
+    ],
+
+    "delta": [
+        "delta",
+        "delta days"
+    ],
+
     "cov_in_days": [
         "cov in days",
         "coverage in days"
@@ -487,7 +497,8 @@ def process_upload_task(task_id: str, content: bytes):
             "no_trace_damage", "po_balance", "gpc_stk",
             "gpc_free_stk", "branch_stk", "for_1_day_req",
             "stk_in_alt_part", "req_on_12m_avg", "req_on_03m_avg",
-            "average", "aging_more_than_120_days"
+            "average", "aging_more_than_120_days",
+            "lead_time", "delta"
         ]
 
         for col in NUMERIC_FIELDS:
