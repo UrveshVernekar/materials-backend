@@ -57,6 +57,40 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_monthly_material ON material_monthly_data(material_code);
     CREATE INDEX IF NOT EXISTS idx_monthly_date ON material_monthly_data(year, month);
 
+
+    CREATE TABLE IF NOT EXISTS purchase_orders (
+        id              INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        material_code   VARCHAR(50) NOT NULL REFERENCES materials(material_code),
+        po_number       VARCHAR(255) NOT NULL UNIQUE,
+        order_qty       NUMERIC DEFAULT 0,
+        receive_qty     NUMERIC DEFAULT 0,
+        year            INT NOT NULL,
+        month           INT NOT NULL CHECK (month BETWEEN 1 AND 12),
+        period_date     DATE GENERATED ALWAYS AS (MAKE_DATE(year, month, 1)) STORED,
+        created_at      TIMESTAMPTZ DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ DEFAULT NOW(),
+
+        CHECK (receive_qty <= order_qty)
+    );
+
+    CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        NEW.updated_at = NOW();
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS set_purchase_orders_updated_at ON purchase_orders;
+    CREATE TRIGGER set_purchase_orders_updated_at
+        BEFORE UPDATE ON purchase_orders
+        FOR EACH ROW
+        EXECUTE FUNCTION trigger_set_timestamp();
+
+    CREATE INDEX IF NOT EXISTS idx_po_material ON purchase_orders (material_code);
+    CREATE INDEX IF NOT EXISTS idx_po_period   ON purchase_orders (year, month, material_code);
+    CREATE INDEX IF NOT EXISTS idx_po_date     ON purchase_orders (period_date);
+
     """
     
     with engine.begin() as conn:

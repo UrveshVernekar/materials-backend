@@ -7,6 +7,7 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.analytics import router as analytics_router
 from app.routers.inventory import router as inventory_router
 from app.routers.admin import router as admin_router
+from app.routers.purchase_orders import router as purchase_order_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,7 +19,7 @@ app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change in production
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Change in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,6 +30,7 @@ app.include_router(dashboard_router)
 app.include_router(analytics_router)
 app.include_router(inventory_router)
 app.include_router(admin_router)
+app.include_router(purchase_order_router)
 
 @app.get("/")
 def root():

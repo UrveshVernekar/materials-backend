@@ -581,6 +581,7 @@ def process_upload_task(task_id: str, content: bytes):
         with engine.begin() as conn:
 
             conn.execute(text("DELETE FROM materials CASCADE"))
+            conn.execute(text("DELETE FROM material_monthly_data CASCADE"))
 
             if not materials_df.empty:
                 materials_df.to_sql(
