@@ -1,14 +1,24 @@
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import numpy as np
 from datetime import datetime
 import re
+import sys
+import os
+
+# Set up path to allow importing app modules
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from app.core.init_db import init_db
 
 # ================== CONFIG ==================
 EXCEL_PATH = './procurement-data.xlsx'   # Update this
 DB_URI = "postgresql+psycopg2://materialsuser:materials1234#$@localhost:5432/materials_db"
 
 engine = create_engine(DB_URI)
+
+# Initialize/update database schema first
+print("Initializing/updating database schema...")
+init_db()
 
 # Month mapping (Excel headers like "Apr-25")
 month_map = {
@@ -75,12 +85,12 @@ materials_df.rename(columns={
     'price': 'price',
     'MOQ': 'moq',
     'COV IN DAYS': 'cov_in_days',
-    'branch pend 22.04': 'branch_pend_22_04',
+    'branch pend 22.04': 'branch_pend',
     'NO TRACE / Damage': 'no_trace_damage',
-    'PO BALLANCE 22.04': 'po_balance_22_04',
-    'GPC stk  22.04': 'gpc_stk_22_04',
-    'GPC FREE STK 22.04': 'gpc_free_stk_22_04',
-    'Branch stk 22.04': 'branch_stk_22_04',
+    'PO BALLANCE 22.04': 'po_balance',
+    'GPC stk  22.04': 'gpc_stk',
+    'GPC FREE STK 22.04': 'gpc_free_stk',
+    'Branch stk 22.04': 'branch_stk',
     'FOR  1 DAY REQ': 'for_1_day_req',
     'STK IN ALT PART': 'stk_in_alt_part',
     'req on 12 m avg': 'req_on_12m_avg',
@@ -90,6 +100,10 @@ materials_df.rename(columns={
     'blocked code in Aging': 'blocked_code_in_aging',
     'remarks': 'remarks'
 }, inplace=True)
+
+# Drop sr_no as it is not part of the database schema
+if 'sr_no' in materials_df.columns:
+    materials_df.drop(columns=['sr_no'], inplace=True)
 
 # ================== 2. MONTHLY DATA ==================
 monthly_records = []
@@ -115,7 +129,16 @@ for _, row in df.iterrows():
 # ================== 4. DATABASE INSERTION (SAFE ORDER) ==================
 print("Inserting data into database...")
 monthly_df = pd.DataFrame(monthly_records)
-monthly_df.to_sql('material_monthly_data', engine, if_exists='replace', index=False)
-materials_df.to_sql('materials', engine, if_exists='replace', index=False)
+
+with engine.begin() as conn:
+    # Safely clear old records while keeping schema intact
+    conn.execute(text("DELETE FROM material_monthly_data CASCADE"))
+    conn.execute(text("DELETE FROM materials CASCADE"))
+
+    # Append new data to existing structured schema
+    if not materials_df.empty:
+        materials_df.to_sql('materials', con=conn, if_exists='append', index=False)
+    if not monthly_df.empty:
+        monthly_df.to_sql('material_monthly_data', con=conn, if_exists='append', index=False)
 
 print(f"Inserted {len(materials_df)} materials and {len(monthly_df)} monthly records.")

@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Numeric, DateTime
+from sqlalchemy.orm import synonym
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -15,7 +16,8 @@ class Material(Base):
     price = Column(Numeric(12, 2))
     moq = Column(Integer)
     cov_in_days = Column(Numeric)
-    status = Column(String(50))  # Running, New, Obsolete, Slow
+    product_status = Column("product_status", String(100))
+    status = synonym("product_status")  # Running, New, Obsolete, Slow
     
     # Stock and tracking fields
     gpc_stk = Column(Numeric(12, 2))
