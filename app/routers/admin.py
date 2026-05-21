@@ -652,7 +652,14 @@ def process_prediction_task(task_id: str):
         def forecast_double_smoothing(series, forecast_steps=3):
             try:
                 model = Holt(series, initialization_method="estimated").fit()
-                return model.forecast(steps=forecast_steps)
+                raw_forecast = model.forecast(steps=forecast_steps)
+                
+                # timeline fix
+                last_date = series.index[-1]
+                forecast_start_date = last_date + pd.DateOffset(months=1)
+                future_dates = pd.date_range(start=forecast_start_date, periods=forecast_steps, freq='MS')
+                
+                return pd.Series(raw_forecast.values, index=future_dates)
             except Exception:
                 mean_val = series.mean() if len(series) > 0 else 0.0
                 idx = pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=forecast_steps, freq='ME')
@@ -665,7 +672,14 @@ def process_prediction_task(task_id: str):
                 model = ExponentialSmoothing(series, trend="add", seasonal="add", 
                                              seasonal_periods=seasonal_periods, 
                                              initialization_method="estimated").fit()
-                return model.forecast(steps=forecast_steps)
+                raw_forecast = model.forecast(steps=forecast_steps)
+                
+                # timeline fix
+                last_date = series.index[-1]
+                forecast_start_date = last_date + pd.DateOffset(months=1)
+                future_dates = pd.date_range(start=forecast_start_date, periods=forecast_steps, freq='MS')
+                
+                return pd.Series(raw_forecast.values, index=future_dates)
             except Exception:
                 return forecast_double_smoothing(series, forecast_steps=forecast_steps)
 
@@ -673,23 +687,29 @@ def process_prediction_task(task_id: str):
             try:
                 y = np.asarray(series, dtype=float)
                 n = len(y)
+                if n == 0:
+                    return pd.Series(np.zeros(forecast_steps))
                 z, p = np.zeros(n), np.zeros(n)
                 forecast = np.zeros(n + forecast_steps)
                 
                 non_zero = y[y > 0]
-                z[0] = non_zero[0] if len(non_zero) > 0 else 0
-                p[0] = len(non_zero) / n if n > 0 else 0
+                z[0] = non_zero[0] if len(non_zero) > 0 else 0.0
+                p[0] = len(non_zero) / n if n > 0 else 0.0
                 
                 for t in range(1, n):
                     if y[t] > 0:
                         z[t] = alpha * y[t] + (1 - alpha) * z[t-1]
-                        p[t] = beta * 1 + (1 - beta) * p[t-1]
+                        p[t] = beta * 1.0 + (1 - beta) * p[t-1]
                     else:
                         z[t] = z[t-1]
                         p[t] = (1 - beta) * p[t-1]
                 for h in range(0, forecast_steps):
                     forecast[n + h] = z[-1] * p[-1]
-                return pd.Series(forecast[n:], index=pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=forecast_steps, freq='ME'))
+                
+                # timeline fix
+                forecast_start_date = series.index[-1] + pd.DateOffset(months=1)
+                future_dates = pd.date_range(start=forecast_start_date, periods=forecast_steps, freq='MS')
+                return pd.Series(forecast[n:], index=future_dates)
             except Exception:
                 mean_val = series.mean() if len(series) > 0 else 0.0
                 idx = pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=forecast_steps, freq='ME')
@@ -734,7 +754,7 @@ def process_prediction_task(task_id: str):
         sample_consumption = sorted_parts[['material_code', 'consumption', 'lead_time', 'delta']]
 
         df_part = pd.DataFrame({
-            'Material Code': sample_consumption['material_code'],
+            'Material_Code': sample_consumption['material_code'],
             'Consumption': sample_consumption['consumption'],
             'lead_time': sample_consumption['lead_time'],
             'delta': sample_consumption['delta'],
@@ -743,90 +763,163 @@ def process_prediction_task(task_id: str):
         df_part = df_part.sort_index()
         df_part.index.name = 'Month-Year'
 
-        distinct_material_code = df_part[['Material Code', 'lead_time', 'delta']].drop_duplicates()
+        distinct_material_code = df_part['Material_Code'].drop_duplicates()
         total_materials = len(distinct_material_code)
         
         prediction_tasks[task_id] = {"status": "processing", "progress": 40, "message": f"Running forecasts for {total_materials} materials..."}
 
         prediction_records = []
         
-        for i, (index, row) in enumerate(distinct_material_code.iterrows()):
+        for i, mat_code in enumerate(distinct_material_code):
             # Update progress periodically
             if i % 10 == 0:
                 progress_pct = 40 + int((i / total_materials) * 50)
                 prediction_tasks[task_id] = {
                     "status": "processing",
                     "progress": progress_pct,
-                    "message": f"Forecasting {i}/{total_materials} ({row['Material Code']})..."
+                    "message": f"Forecasting {i}/{total_materials} ({mat_code})..."
                 }
 
-            filtered_df = df_part[df_part['Material Code'] == row['Material Code']]
-            time_series_data = filtered_df['Consumption']
+            try:
+                res = df_part.query("Material_Code == @mat_code").copy()
+                res['year'] = res.index.year
+                res['month'] = res.index.month
+                
+                # Construct period column
+                res['period'] = pd.to_datetime(res[['year', 'month']].assign(day=1)) 
 
-            # Need at least some historical data to split and train
-            if len(time_series_data) < 4:
-                future_forecast = forecast_tsb(time_series_data, alpha=0.2, beta=0.2, forecast_steps=3)
-            else:
-                train_series = time_series_data.iloc[:-3]
-                actual_test  = time_series_data.iloc[-3:]
-                HORIZON = len(actual_test)
+                dates_res = res['period']
+                cons_res = res['Consumption']
 
-                # Generate predictions on holdout slice
-                fc_double = forecast_double_smoothing(train_series, forecast_steps=HORIZON)
-                fc_triple = forecast_triple_smoothing(train_series, seasonal_periods=3, forecast_steps=HORIZON)
-                fc_tsb    = forecast_tsb(train_series, alpha=0.2, beta=0.2, forecast_steps=HORIZON)
+                df_ts = pd.DataFrame({
+                    'Consumption': cons_res
+                })
+                df_ts.index = dates_res
+                df_ts = df_ts.sort_index()
+                df_ts.index.name = 'Month-Year'
 
-                # Calculate RMSE
-                try:
-                    err_double = root_mean_squared_error(actual_test, fc_double)
-                except Exception:
-                    err_double = 999999.0
-                try:
-                    err_triple = root_mean_squared_error(actual_test, fc_triple)
-                except Exception:
-                    err_triple = 999999.0
-                try:
-                    err_tsb = root_mean_squared_error(actual_test, fc_tsb)
-                except Exception:
-                    err_tsb = 999999.0
-
-                errors = {
-                    'Double_Smooth': err_double,
-                    'Triple_Smooth': err_triple,
-                    'TSB_Method': err_tsb
-                }
-                winning_model_name = min(errors, key=errors.get)
-
-                # Generate actual future forecast
-                if winning_model_name == 'Double_Smooth':
-                    future_forecast = forecast_double_smoothing(time_series_data, forecast_steps=3)
-                elif winning_model_name == 'Triple_Smooth':
-                    future_forecast = forecast_triple_smoothing(time_series_data, seasonal_periods=3, forecast_steps=3)
-                else:
+                time_series_data = df_ts['Consumption']
+                
+                # Need at least some historical data to split and train
+                if len(time_series_data) < 4:
                     future_forecast = forecast_tsb(time_series_data, alpha=0.2, beta=0.2, forecast_steps=3)
+                    winning_model_name = 'TSB_Method'
+                else:
+                    train_series = time_series_data.iloc[:-3]
+                    actual_test  = time_series_data.iloc[-3:]
+                    HORIZON = len(actual_test)
 
-            # Reformat future forecast to save in DB
-            ff_dates = list(future_forecast.index)
-            ff_vals = list(future_forecast.values)
+                    # Generate predictions on holdout slice
+                    fc_double = forecast_double_smoothing(train_series, forecast_steps=HORIZON)
+                    fc_triple = forecast_triple_smoothing(train_series, seasonal_periods=3, forecast_steps=HORIZON)
+                    fc_tsb    = forecast_tsb(train_series, alpha=0.2, beta=0.2, forecast_steps=HORIZON)
 
-            m1_date = ff_dates[0].to_pydatetime().date() if len(ff_dates) > 0 else None
-            m1_pred = float(ff_vals[0]) if len(ff_vals) > 0 else 0.0
+                    # Calculate RMSE
+                    try:
+                        err_double = root_mean_squared_error(actual_test, fc_double)
+                    except Exception:
+                        err_double = 999999.0
+                    try:
+                        err_triple = root_mean_squared_error(actual_test, fc_triple)
+                    except Exception:
+                        err_triple = 999999.0
+                    try:
+                        err_tsb = root_mean_squared_error(actual_test, fc_tsb)
+                    except Exception:
+                        err_tsb = 999999.0
 
-            m2_date = ff_dates[1].to_pydatetime().date() if len(ff_dates) > 1 else None
-            m2_pred = float(ff_vals[1]) if len(ff_vals) > 1 else 0.0
+                    errors = {
+                        'Double_Smooth': err_double,
+                        'Triple_Smooth': err_triple,
+                        'TSB_Method': err_tsb
+                    }
+                    winning_model_name = min(errors, key=errors.get)
 
-            m3_date = ff_dates[2].to_pydatetime().date() if len(ff_dates) > 2 else None
-            m3_pred = float(ff_vals[2]) if len(ff_vals) > 2 else 0.0
+                    # Generate actual future forecast
+                    if winning_model_name == 'Double_Smooth':
+                        future_forecast = forecast_double_smoothing(time_series_data, forecast_steps=3)
+                    elif winning_model_name == 'Triple_Smooth':
+                        future_forecast = forecast_triple_smoothing(time_series_data, seasonal_periods=3, forecast_steps=3)
+                    else:
+                        future_forecast = forecast_tsb(time_series_data, alpha=0.2, beta=0.2, forecast_steps=3)
 
-            prediction_records.append({
-                'material_code': row['Material Code'],
-                'month1_date': m1_date,
-                'month1_prediction': m1_pred,
-                'month2_date': m2_date,
-                'month2_prediction': m2_pred,
-                'month3_date': m3_date,
-                'month3_prediction': m3_pred
-            })
+                # Monte Carlo and Safety Stock logic
+                avg_future_monthly_demand = future_forecast.mean()
+
+                if winning_model_name == 'Double_Smooth':
+                    try:
+                        residuals = time_series_data - Holt(time_series_data).fit().fittedvalues
+                    except Exception:
+                        residuals = time_series_data - time_series_data.mean()
+                else:
+                    residuals = time_series_data - time_series_data.mean()
+
+                std_monthly_demand = float(residuals.std()) if len(residuals) > 1 else 0.0
+                std_daily_demand = std_monthly_demand / np.sqrt(30.0)
+                mean_daily_demand = float(time_series_data.mean()) / 30.0
+
+                min_lt = float(res['lead_time'].min())
+                max_lt = float((res['lead_time'] + res['delta']).max())
+                
+                # Protect against invalid lead time bounds
+                if max_lt <= min_lt:
+                    max_lt = min_lt + 1.0
+
+                most_likely_lt = (min_lt + max_lt) / 2.0
+
+                shape_alpha = 1.0 + 4.0 * ((most_likely_lt - min_lt) / (max_lt - min_lt))
+                shape_beta = 1.0 + 4.0 * ((max_lt - most_likely_lt) / (max_lt - min_lt))
+
+                # Vectorized Monte Carlo Simulation
+                simulations = 10000
+                simulated_lts = stats.beta.rvs(shape_alpha, shape_beta, loc=min_lt, scale=max_lt - min_lt, size=simulations)
+                scale_params = np.maximum(0.1, std_daily_demand * np.sqrt(simulated_lts))
+                total_demands = np.random.normal(loc=mean_daily_demand * simulated_lts, scale=scale_params)
+                total_demands = np.maximum(0.0, total_demands)
+
+                df_ltd = pd.Series(total_demands)
+                average_ltd = df_ltd.mean()
+                reorder_point_95 = df_ltd.quantile(0.95)
+                safety_stock_95 = reorder_point_95 - average_ltd
+
+                # Risk-Adjusted forecast
+                adjusted_monthly_forecast = future_forecast.copy()
+                safety_stock_per_month = safety_stock_95 / len(future_forecast) if len(future_forecast) > 0 else 0.0
+                adjusted_monthly_forecast = adjusted_monthly_forecast + safety_stock_per_month
+
+                # Reformat future forecast to save in DB
+                ff_dates = list(adjusted_monthly_forecast.index)
+                ff_vals = list(adjusted_monthly_forecast.values)
+
+                m1_date = ff_dates[0].to_pydatetime().date() if len(ff_dates) > 0 else None
+                m1_pred = float(ff_vals[0]) if len(ff_vals) > 0 else 0.0
+
+                m2_date = ff_dates[1].to_pydatetime().date() if len(ff_dates) > 1 else None
+                m2_pred = float(ff_vals[1]) if len(ff_vals) > 1 else 0.0
+
+                m3_date = ff_dates[2].to_pydatetime().date() if len(ff_dates) > 2 else None
+                m3_pred = float(ff_vals[2]) if len(ff_vals) > 2 else 0.0
+
+                prediction_records.append({
+                    'material_code': mat_code,
+                    'month1_date': m1_date,
+                    'month1_prediction': m1_pred,
+                    'month2_date': m2_date,
+                    'month2_prediction': m2_pred,
+                    'month3_date': m3_date,
+                    'month3_prediction': m3_pred
+                })
+            except Exception as item_err:
+                print(f"Error predicting for material {mat_code}: {item_err}")
+                prediction_records.append({
+                    'material_code': mat_code,
+                    'month1_date': None,
+                    'month1_prediction': 0.0,
+                    'month2_date': None,
+                    'month2_prediction': 0.0,
+                    'month3_date': None,
+                    'month3_prediction': 0.0
+                })
 
         prediction_tasks[task_id] = {"status": "processing", "progress": 90, "message": "Saving predictions to database..."}
 
