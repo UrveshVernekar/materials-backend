@@ -72,7 +72,7 @@ def init_db():
 
     CREATE TABLE IF NOT EXISTS purchase_orders (
         id              INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        material_code   VARCHAR(50) NOT NULL REFERENCES materials(material_code),
+        material_code   VARCHAR(50) NOT NULL,
         po_number       VARCHAR(255) NOT NULL UNIQUE,
         order_qty       NUMERIC DEFAULT 0,
         receive_qty     NUMERIC DEFAULT 0,
