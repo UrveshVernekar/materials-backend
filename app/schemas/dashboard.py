@@ -30,6 +30,12 @@ class MaterialTableRow(BaseModel):
     twelve_m_avg: Optional[float] = 0
     price: Optional[float]
     status: str
+    month1_prediction: Optional[float] = None
+    month2_prediction: Optional[float] = None
+    month3_prediction: Optional[float] = None
+    month1_date: Optional[date] = None
+    month2_date: Optional[date] = None
+    month3_date: Optional[date] = None
 
 class DashboardTableResponse(BaseModel):
     items: List[MaterialTableRow]

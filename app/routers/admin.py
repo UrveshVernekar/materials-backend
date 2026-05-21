@@ -619,3 +619,257 @@ def process_upload_task(task_id: str, content: bytes):
             "message": "Import failed",
             "error": str(e)
         }
+
+
+# =========================================================
+# PREDICTION ENGINE ENDPOINTS & WORKER
+# =========================================================
+prediction_tasks = {}
+
+def process_prediction_task(task_id: str):
+    try:
+        from statsmodels.tsa.holtwinters import Holt, ExponentialSmoothing
+        import scipy.stats as stats
+        try:
+            from sklearn.metrics import root_mean_squared_error
+        except ImportError:
+            from sklearn.metrics import mean_squared_error
+            def root_mean_squared_error(y_true, y_pred):
+                return np.sqrt(mean_squared_error(y_true, y_pred))
+    except Exception as import_err:
+        prediction_tasks[task_id] = {
+            "status": "failed",
+            "progress": 0,
+            "message": "Failed to import required scientific libraries (statsmodels, scikit-learn, scipy). Please ensure they are installed.",
+            "error": str(import_err)
+        }
+        return
+
+    try:
+        prediction_tasks[task_id] = {"status": "processing", "progress": 10, "message": "Loading materials and consumption history from DB..."}
+
+        # Helper forecasting functions
+        def forecast_double_smoothing(series, forecast_steps=3):
+            try:
+                model = Holt(series, initialization_method="estimated").fit()
+                return model.forecast(steps=forecast_steps)
+            except Exception:
+                mean_val = series.mean() if len(series) > 0 else 0.0
+                idx = pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=forecast_steps, freq='ME')
+                return pd.Series([mean_val]*forecast_steps, index=idx)
+
+        def forecast_triple_smoothing(series, seasonal_periods=3, forecast_steps=3):
+            try:
+                if len(series) < 2 * seasonal_periods:
+                    return forecast_double_smoothing(series, forecast_steps=forecast_steps)
+                model = ExponentialSmoothing(series, trend="add", seasonal="add", 
+                                             seasonal_periods=seasonal_periods, 
+                                             initialization_method="estimated").fit()
+                return model.forecast(steps=forecast_steps)
+            except Exception:
+                return forecast_double_smoothing(series, forecast_steps=forecast_steps)
+
+        def forecast_tsb(series, alpha=0.2, beta=0.2, forecast_steps=3):
+            try:
+                y = np.asarray(series, dtype=float)
+                n = len(y)
+                z, p = np.zeros(n), np.zeros(n)
+                forecast = np.zeros(n + forecast_steps)
+                
+                non_zero = y[y > 0]
+                z[0] = non_zero[0] if len(non_zero) > 0 else 0
+                p[0] = len(non_zero) / n if n > 0 else 0
+                
+                for t in range(1, n):
+                    if y[t] > 0:
+                        z[t] = alpha * y[t] + (1 - alpha) * z[t-1]
+                        p[t] = beta * 1 + (1 - beta) * p[t-1]
+                    else:
+                        z[t] = z[t-1]
+                        p[t] = (1 - beta) * p[t-1]
+                for h in range(0, forecast_steps):
+                    forecast[n + h] = z[-1] * p[-1]
+                return pd.Series(forecast[n:], index=pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=forecast_steps, freq='ME'))
+            except Exception:
+                mean_val = series.mean() if len(series) > 0 else 0.0
+                idx = pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=forecast_steps, freq='ME')
+                return pd.Series([mean_val]*forecast_steps, index=idx)
+
+        query_materials = """
+            SELECT DISTINCT
+                m.material_code,
+                m.material_description,
+                m.machine_population,
+                m.last_production_year,
+                m.lead_time,
+                m.delta,
+                m.req_on_12m_avg,
+                m.serv_per_left,
+                m.price,
+                m.moq,
+                mmd.year,
+                mmd.month,
+                mmd.consumption
+            FROM public.materials m
+            JOIN public.material_monthly_data mmd
+                ON m.material_code = mmd.material_code
+            ORDER BY
+                m.material_code,
+                mmd.year,
+                mmd.month;
+        """
+
+        with engine.connect() as conn:
+            df_materials = pd.read_sql(text(query_materials), conn)
+
+        if df_materials.empty:
+            raise Exception("No material monthly data found in the database. Please import data first.")
+
+        prediction_tasks[task_id] = {"status": "processing", "progress": 30, "message": "Pre-processing data..."}
+
+        sorted_parts = df_materials[['material_code', 'month', 'year', 'consumption', 'lead_time', 'delta', 'req_on_12m_avg']].sort_values(by='req_on_12m_avg', ascending=False)
+        sorted_parts['period'] = pd.to_datetime(sorted_parts[['year', 'month']].assign(day=1))
+        
+        dates = sorted_parts['period']
+        sample_consumption = sorted_parts[['material_code', 'consumption', 'lead_time', 'delta']]
+
+        df_part = pd.DataFrame({
+            'Material Code': sample_consumption['material_code'],
+            'Consumption': sample_consumption['consumption'],
+            'lead_time': sample_consumption['lead_time'],
+            'delta': sample_consumption['delta'],
+        })
+        df_part.index = dates
+        df_part = df_part.sort_index()
+        df_part.index.name = 'Month-Year'
+
+        distinct_material_code = df_part[['Material Code', 'lead_time', 'delta']].drop_duplicates()
+        total_materials = len(distinct_material_code)
+        
+        prediction_tasks[task_id] = {"status": "processing", "progress": 40, "message": f"Running forecasts for {total_materials} materials..."}
+
+        prediction_records = []
+        
+        for i, (index, row) in enumerate(distinct_material_code.iterrows()):
+            # Update progress periodically
+            if i % 10 == 0:
+                progress_pct = 40 + int((i / total_materials) * 50)
+                prediction_tasks[task_id] = {
+                    "status": "processing",
+                    "progress": progress_pct,
+                    "message": f"Forecasting {i}/{total_materials} ({row['Material Code']})..."
+                }
+
+            filtered_df = df_part[df_part['Material Code'] == row['Material Code']]
+            time_series_data = filtered_df['Consumption']
+
+            # Need at least some historical data to split and train
+            if len(time_series_data) < 4:
+                future_forecast = forecast_tsb(time_series_data, alpha=0.2, beta=0.2, forecast_steps=3)
+            else:
+                train_series = time_series_data.iloc[:-3]
+                actual_test  = time_series_data.iloc[-3:]
+                HORIZON = len(actual_test)
+
+                # Generate predictions on holdout slice
+                fc_double = forecast_double_smoothing(train_series, forecast_steps=HORIZON)
+                fc_triple = forecast_triple_smoothing(train_series, seasonal_periods=3, forecast_steps=HORIZON)
+                fc_tsb    = forecast_tsb(train_series, alpha=0.2, beta=0.2, forecast_steps=HORIZON)
+
+                # Calculate RMSE
+                try:
+                    err_double = root_mean_squared_error(actual_test, fc_double)
+                except Exception:
+                    err_double = 999999.0
+                try:
+                    err_triple = root_mean_squared_error(actual_test, fc_triple)
+                except Exception:
+                    err_triple = 999999.0
+                try:
+                    err_tsb = root_mean_squared_error(actual_test, fc_tsb)
+                except Exception:
+                    err_tsb = 999999.0
+
+                errors = {
+                    'Double_Smooth': err_double,
+                    'Triple_Smooth': err_triple,
+                    'TSB_Method': err_tsb
+                }
+                winning_model_name = min(errors, key=errors.get)
+
+                # Generate actual future forecast
+                if winning_model_name == 'Double_Smooth':
+                    future_forecast = forecast_double_smoothing(time_series_data, forecast_steps=3)
+                elif winning_model_name == 'Triple_Smooth':
+                    future_forecast = forecast_triple_smoothing(time_series_data, seasonal_periods=3, forecast_steps=3)
+                else:
+                    future_forecast = forecast_tsb(time_series_data, alpha=0.2, beta=0.2, forecast_steps=3)
+
+            # Reformat future forecast to save in DB
+            ff_dates = list(future_forecast.index)
+            ff_vals = list(future_forecast.values)
+
+            m1_date = ff_dates[0].to_pydatetime().date() if len(ff_dates) > 0 else None
+            m1_pred = float(ff_vals[0]) if len(ff_vals) > 0 else 0.0
+
+            m2_date = ff_dates[1].to_pydatetime().date() if len(ff_dates) > 1 else None
+            m2_pred = float(ff_vals[1]) if len(ff_vals) > 1 else 0.0
+
+            m3_date = ff_dates[2].to_pydatetime().date() if len(ff_dates) > 2 else None
+            m3_pred = float(ff_vals[2]) if len(ff_vals) > 2 else 0.0
+
+            prediction_records.append({
+                'material_code': row['Material Code'],
+                'month1_date': m1_date,
+                'month1_prediction': m1_pred,
+                'month2_date': m2_date,
+                'month2_prediction': m2_pred,
+                'month3_date': m3_date,
+                'month3_prediction': m3_pred
+            })
+
+        prediction_tasks[task_id] = {"status": "processing", "progress": 90, "message": "Saving predictions to database..."}
+
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM consumption_prediction"))
+            if prediction_records:
+                pred_df = pd.DataFrame(prediction_records)
+                pred_df.to_sql(
+                    'consumption_prediction',
+                    con=conn,
+                    if_exists='append',
+                    index=False,
+                    method=psql_insert_copy
+                )
+
+        prediction_tasks[task_id] = {
+            "status": "completed",
+            "progress": 100,
+            "message": "Predictions generated and saved successfully",
+            "predictions_count": len(prediction_records)
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        prediction_tasks[task_id] = {
+            "status": "failed",
+            "progress": 0,
+            "message": "Prediction failed",
+            "error": str(e)
+        }
+
+@router.post("/predict")
+async def start_prediction(background_tasks: BackgroundTasks):
+    task_id = str(uuid.uuid4())
+    prediction_tasks[task_id] = {"status": "processing", "progress": 0, "message": "Initializing prediction task..."}
+    background_tasks.add_task(process_prediction_task, task_id)
+    return {
+        "message": "Prediction task started",
+        "task_id": task_id
+    }
+
+@router.get("/predict/status/{task_id}")
+async def get_prediction_status(task_id: str):
+    if task_id not in prediction_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return prediction_tasks[task_id]

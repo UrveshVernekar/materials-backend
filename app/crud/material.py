@@ -72,9 +72,16 @@ def get_filtered_materials(db: Session, filters: MaterialFilter):
                     WHEN m.inh_s_obslte = 'OBSOLETE' THEN 'Obsolete'
                     WHEN m.last_production_year >= 2025 THEN 'New'
                     ELSE 'Running' 
-                END as status
+                END as status,
+                p.month1_prediction,
+                p.month2_prediction,
+                p.month3_prediction,
+                p.month1_date,
+                p.month2_date,
+                p.month3_date
             FROM materials m
             LEFT JOIN calc_summary s ON m.material_code = s.material_code
+            LEFT JOIN consumption_prediction p ON m.material_code = p.material_code
         )
         SELECT * FROM material_data
         WHERE 1=1

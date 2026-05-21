@@ -57,6 +57,18 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_monthly_material ON material_monthly_data(material_code);
     CREATE INDEX IF NOT EXISTS idx_monthly_date ON material_monthly_data(year, month);
 
+    CREATE TABLE IF NOT EXISTS consumption_prediction (
+        material_code VARCHAR(50) PRIMARY KEY REFERENCES materials(material_code) ON DELETE CASCADE,
+        month1_date DATE,
+        month1_prediction NUMERIC(12,2),
+        month2_date DATE,
+        month2_prediction NUMERIC(12,2),
+        month3_date DATE,
+        month3_prediction NUMERIC(12,2),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
 
     CREATE TABLE IF NOT EXISTS purchase_orders (
         id              INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
