@@ -20,6 +20,7 @@ def init_db():
         price NUMERIC(12,2),
         moq INT,
         lead_time INT DEFAULT 0,
+        lead_time_qty NUMERIC(12,2) DEFAULT 0,
         delta INT DEFAULT 0,
         cov_in_days NUMERIC,
         branch_pend NUMERIC,

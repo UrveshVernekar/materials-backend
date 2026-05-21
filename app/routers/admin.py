@@ -601,6 +601,37 @@ def process_upload_task(task_id: str, content: bytes):
                     method=psql_insert_copy
                 )
 
+            # Update lead_time_qty using the monthly consumption and lead_time values
+            if not materials_df.empty and not monthly_df.empty:
+                update_query = """
+                WITH ranked_data AS (
+                    SELECT
+                        mmd.material_code,
+                        mmd.consumption,
+                        m.lead_time,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY mmd.material_code
+                            ORDER BY mmd.year DESC, mmd.month DESC
+                        ) AS rn
+                    FROM public.material_monthly_data mmd
+                    JOIN public.materials m
+                        ON m.material_code = mmd.material_code
+                ),
+                calculated_qty AS (
+                    SELECT
+                        material_code,
+                        (AVG(consumption) / 30) * MAX(lead_time) AS lead_time_qty
+                    FROM ranked_data
+                    WHERE rn <= 12
+                    GROUP BY material_code
+                )
+                UPDATE public.materials m
+                SET lead_time_qty = cq.lead_time_qty
+                FROM calculated_qty cq
+                WHERE m.material_code = cq.material_code;
+                """
+                conn.execute(text(update_query))
+
         upload_tasks[task_id] = {
             "status": "completed",
             "progress": 100,

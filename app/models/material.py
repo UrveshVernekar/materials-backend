@@ -12,6 +12,7 @@ class Material(Base):
     machine_population = Column(Integer)
     last_production_year = Column(Integer)
     lead_time = Column(Numeric)
+    lead_time_qty = Column(Numeric(12, 2), default=0)
     delta = Column(Numeric)
     price = Column(Numeric(12, 2))
     moq = Column(Integer)
