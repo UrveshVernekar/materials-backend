@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-def get_monthly_consumption_trend(db: Session, material_code: str = None):
+def get_monthly_consumption_trend(db: Session, material_code: str = None, limit: int = None):
     params = {}
     
     base_query = """
@@ -20,9 +20,13 @@ def get_monthly_consumption_trend(db: Session, material_code: str = None):
         
     base_query += """
         GROUP BY year, month
-        ORDER BY year ASC, month ASC
+        ORDER BY year DESC, month DESC
     """
     
+    if limit:
+        base_query += " LIMIT :limit"
+        params['limit'] = limit
+        
     result = db.execute(text(base_query), params).fetchall()
     
     items = []
@@ -34,4 +38,5 @@ def get_monthly_consumption_trend(db: Session, material_code: str = None):
             "total_consumption": float(row.total_consumption or 0)
         })
         
+    items.reverse()
     return items
