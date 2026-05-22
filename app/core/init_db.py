@@ -104,6 +104,51 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_po_period   ON purchase_orders (year, month, material_code);
     CREATE INDEX IF NOT EXISTS idx_po_date     ON purchase_orders (period_date);
 
+    -- Ensure all columns exist for existing deployments
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS product_category VARCHAR(200) DEFAULT NULL;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS product_status VARCHAR(100) DEFAULT NULL;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS vendor VARCHAR(200);
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS machine_population BIGINT;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS last_production_year INT;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS serv_per_left INT;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS inh NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS inh_s_obslte VARCHAR(50);
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS alt_token VARCHAR(50);
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS alt VARCHAR(50);
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS price NUMERIC(12,2);
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS moq INT;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS lead_time INT DEFAULT 0;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS lead_time_qty NUMERIC(12,2) DEFAULT 0;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS delta INT DEFAULT 0;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS cov_in_days NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS branch_pend NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS no_trace_damage NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS po_balance NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS gpc_stk NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS gpc_free_stk NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS branch_stk NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS for_1_day_req NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS stk_in_alt_part NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS req_on_12m_avg NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS req_on_03m_avg NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS average NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS aging_more_than_120_days NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS blocked_code_in_aging VARCHAR(50);
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS remarks TEXT;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+    ALTER TABLE material_monthly_data ADD COLUMN IF NOT EXISTS value_type VARCHAR(50) DEFAULT 'consumption';
+
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month1_date DATE;
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month1_prediction NUMERIC(12,2);
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month2_date DATE;
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month2_prediction NUMERIC(12,2);
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month3_date DATE;
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month3_prediction NUMERIC(12,2);
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
     """
     
     with engine.begin() as conn:
