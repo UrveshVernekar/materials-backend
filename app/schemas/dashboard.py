@@ -31,15 +31,25 @@ class MaterialTableRow(BaseModel):
     twelve_m_avg: Optional[float] = 0
     price: Optional[float]
     status: str
+    product_category: Optional[str] = None
     month1_prediction: Optional[float] = None
+    month1_prediction_days: Optional[float] = 0
     month1_po: Optional[float] = 0
+    month1_po_days: Optional[float] = 0
     month1_mes: Optional[float] = 0
+    month1_mes_days: Optional[float] = 0
     month2_prediction: Optional[float] = None
+    month2_prediction_days: Optional[float] = 0
     month2_po: Optional[float] = 0
+    month2_po_days: Optional[float] = 0
     month2_mes: Optional[float] = 0
+    month2_mes_days: Optional[float] = 0
     month3_prediction: Optional[float] = None
+    month3_prediction_days: Optional[float] = 0
     month3_po: Optional[float] = 0
+    month3_po_days: Optional[float] = 0
     month3_mes: Optional[float] = 0
+    month3_mes_days: Optional[float] = 0
     month1_date: Optional[date] = None
     month2_date: Optional[date] = None
     month3_date: Optional[date] = None

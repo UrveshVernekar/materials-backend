@@ -70,20 +70,31 @@ def get_filtered_materials(db: Session, filters: MaterialFilter):
                 s.three_m_avg,
                 s.twelve_m_avg,
                 m.price,
-                CASE 
-                    WHEN m.inh_s_obslte = 'OBSOLETE' THEN 'Obsolete'
-                    WHEN m.last_production_year >= 2025 THEN 'New'
-                    ELSE 'Running' 
-                END as status,
+                -- CASE 
+                --    WHEN m.inh_s_obslte = 'OBSOLETE' THEN 'Obsolete'
+                --    WHEN m.last_production_year >= 2025 THEN 'New'
+                --    ELSE 'Running' 
+                -- END as status,
+                m.product_status AS status,
+                m.product_category,
                 p.month1_prediction,
+                p.month1_prediction_days,
                 p.month1_po,
+                p.month1_po_days,
                 p.month1_mes,
+                p.month1_mes_days,
                 p.month2_prediction,
+                p.month2_prediction_days,
                 p.month2_po,
+                p.month2_po_days,
                 p.month2_mes,
+                p.month2_mes_days,
                 p.month3_prediction,
+                p.month3_prediction_days,
                 p.month3_po,
+                p.month3_po_days,
                 p.month3_mes,
+                p.month3_mes_days,
                 p.month1_date,
                 p.month2_date,
                 p.month3_date
