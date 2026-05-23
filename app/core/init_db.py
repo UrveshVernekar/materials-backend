@@ -1,8 +1,20 @@
 from sqlalchemy import text
 from app.core.database import engine
+from app.core.security import hash_password
 
 def init_db():
     INIT_SQL = """
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        first_name VARCHAR(100) NOT NULL,
+        last_name VARCHAR(100) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL DEFAULT 'user',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS materials (
         material_id SERIAL PRIMARY KEY,
         material_code VARCHAR(50) UNIQUE NOT NULL,
@@ -165,3 +177,23 @@ def init_db():
     
     with engine.begin() as conn:
         conn.execute(text(INIT_SQL))
+        
+        # Seed default admin user if not exists
+        admin_email = "spares_admin@ifbglobal.com"
+        result = conn.execute(
+            text("SELECT id FROM users WHERE email = :email"),
+            {"email": admin_email}
+        ).fetchone()
+        
+        if not result:
+            hashed = hash_password("admin1234$#")
+            conn.execute(
+                text("INSERT INTO users (first_name, last_name, email, password_hash, role) VALUES (:first_name, :last_name, :email, :password_hash, :role)"),
+                {
+                    "first_name": "Spares",
+                    "last_name": "Admin",
+                    "email": admin_email,
+                    "password_hash": hashed,
+                    "role": "admin"
+                }
+            )

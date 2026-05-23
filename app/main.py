@@ -8,6 +8,7 @@ from app.routers.analytics import router as analytics_router
 from app.routers.inventory import router as inventory_router
 from app.routers.admin import router as admin_router
 from app.routers.purchase_orders import router as purchase_order_router
+from app.routers.auth import router as auth_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,6 +27,7 @@ app.add_middleware(
 )
 
 # Routers
+app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(analytics_router)
 app.include_router(inventory_router)
