@@ -895,10 +895,9 @@ def process_prediction_task(task_id: str):
 
                 min_lt = float(res['lead_time'].min())
                 max_lt = float((res['lead_time'] + res['delta']).max())
-                
-                # Protect against invalid lead time bounds
-                if max_lt <= min_lt:
-                    max_lt = min_lt + 1.0
+
+                if pd.isna(max_lt):
+                    max_lt = min_lt + 5
 
                 most_likely_lt = (min_lt + max_lt) / 2.0
 
