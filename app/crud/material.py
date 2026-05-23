@@ -76,8 +76,14 @@ def get_filtered_materials(db: Session, filters: MaterialFilter):
                     ELSE 'Running' 
                 END as status,
                 p.month1_prediction,
+                p.month1_po,
+                p.month1_mes,
                 p.month2_prediction,
+                p.month2_po,
+                p.month2_mes,
                 p.month3_prediction,
+                p.month3_po,
+                p.month3_mes,
                 p.month1_date,
                 p.month2_date,
                 p.month3_date

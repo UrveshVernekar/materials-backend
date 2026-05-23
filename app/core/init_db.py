@@ -62,10 +62,16 @@ def init_db():
         material_code VARCHAR(50) PRIMARY KEY REFERENCES materials(material_code) ON DELETE CASCADE,
         month1_date DATE,
         month1_prediction NUMERIC(12,2),
+        month1_po NUMERIC(12,2),
+        month1_mes NUMERIC(12,2),
         month2_date DATE,
         month2_prediction NUMERIC(12,2),
+        month2_po NUMERIC(12,2),
+        month2_mes NUMERIC(12,2),
         month3_date DATE,
         month3_prediction NUMERIC(12,2),
+        month3_po NUMERIC(12,2),
+        month3_mes NUMERIC(12,2),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -142,10 +148,16 @@ def init_db():
 
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month1_date DATE;
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month1_prediction NUMERIC(12,2);
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month1_po NUMERIC(12,2);
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month1_mes NUMERIC(12,2);
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month2_date DATE;
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month2_prediction NUMERIC(12,2);
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month2_po NUMERIC(12,2);
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month2_mes NUMERIC(12,2);
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month3_date DATE;
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month3_prediction NUMERIC(12,2);
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month3_po NUMERIC(12,2);
+    ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS month3_mes NUMERIC(12,2);
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
