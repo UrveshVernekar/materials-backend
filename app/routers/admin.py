@@ -940,10 +940,12 @@ def process_prediction_task(task_id: str):
                 m1_po = max(0.0, lead_time_qty - gpc_stk + m1_pred)
                 m1_mes = max(0.0, gpc_stk - m1_pred + m1_po)
 
-                m2_po = max(0.0, m1_po + m2_pred)
+                # m2_po = max(0.0, m1_po + m2_pred)
+                m2_po = max(0.0, m2_pred - (safety_stock_95 / 2))
                 m2_mes = max(0.0, m1_mes + m2_po - m2_pred)
 
-                m3_po = max(0.0, m2_po + m3_pred)
+                # m3_po = max(0.0, m2_po + m3_pred)
+                m3_po = max(0.0, m3_pred - (safety_stock_95 * 0.63))
                 m3_mes = max(0.0, m2_mes + m3_po - m3_pred)
 
                 prediction_records.append({
