@@ -948,20 +948,56 @@ def process_prediction_task(task_id: str):
                 m3_po = max(0.0, m3_pred - (safety_stock_95 * 0.63))
                 m3_mes = max(0.0, m2_mes + m3_po - m3_pred)
 
+                # Calculate days equivalent using mean daily demand
+                daily_demand = float(time_series_data.mean()) / 30.0 if len(time_series_data) > 0 else 0.0
+                if daily_demand > 0.0:
+                    m1_pred_days = m1_pred / daily_demand
+                    m1_po_days = m1_po / daily_demand
+                    m1_mes_days = m1_mes / daily_demand
+
+                    m2_pred_days = m2_pred / daily_demand
+                    m2_po_days = m2_po / daily_demand
+                    m2_mes_days = m2_mes / daily_demand
+
+                    m3_pred_days = m3_pred / daily_demand
+                    m3_po_days = m3_po / daily_demand
+                    m3_mes_days = m3_mes / daily_demand
+                else:
+                    m1_pred_days = 0.0
+                    m1_po_days = 0.0
+                    m1_mes_days = 0.0
+
+                    m2_pred_days = 0.0
+                    m2_po_days = 0.0
+                    m2_mes_days = 0.0
+
+                    m3_pred_days = 0.0
+                    m3_po_days = 0.0
+                    m3_mes_days = 0.0
+
                 prediction_records.append({
                     'material_code': mat_code,
                     'month1_date': m1_date,
                     'month1_prediction': m1_pred,
+                    'month1_prediction_days': m1_pred_days,
                     'month1_po': m1_po,
+                    'month1_po_days': m1_po_days,
                     'month1_mes': m1_mes,
+                    'month1_mes_days': m1_mes_days,
                     'month2_date': m2_date,
                     'month2_prediction': m2_pred,
+                    'month2_prediction_days': m2_pred_days,
                     'month2_po': m2_po,
+                    'month2_po_days': m2_po_days,
                     'month2_mes': m2_mes,
+                    'month2_mes_days': m2_mes_days,
                     'month3_date': m3_date,
                     'month3_prediction': m3_pred,
+                    'month3_prediction_days': m3_pred_days,
                     'month3_po': m3_po,
-                    'month3_mes': m3_mes
+                    'month3_po_days': m3_po_days,
+                    'month3_mes': m3_mes,
+                    'month3_mes_days': m3_mes_days
                 })
             except Exception as item_err:
                 print(f"Error predicting for material {mat_code}: {item_err}")
@@ -969,16 +1005,25 @@ def process_prediction_task(task_id: str):
                     'material_code': mat_code,
                     'month1_date': None,
                     'month1_prediction': 0.0,
+                    'month1_prediction_days': 0.0,
                     'month1_po': 0.0,
+                    'month1_po_days': 0.0,
                     'month1_mes': 0.0,
+                    'month1_mes_days': 0.0,
                     'month2_date': None,
                     'month2_prediction': 0.0,
+                    'month2_prediction_days': 0.0,
                     'month2_po': 0.0,
+                    'month2_po_days': 0.0,
                     'month2_mes': 0.0,
+                    'month2_mes_days': 0.0,
                     'month3_date': None,
                     'month3_prediction': 0.0,
+                    'month3_prediction_days': 0.0,
                     'month3_po': 0.0,
-                    'month3_mes': 0.0
+                    'month3_po_days': 0.0,
+                    'month3_mes': 0.0,
+                    'month3_mes_days': 0.0
                 })
 
         prediction_tasks[task_id] = {"status": "processing", "progress": 90, "message": "Saving predictions to database..."}
