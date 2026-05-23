@@ -758,6 +758,8 @@ def process_prediction_task(task_id: str):
                 m.serv_per_left,
                 m.price,
                 m.moq,
+                m.gpc_stk,
+                m.lead_time_qty,
                 mmd.year,
                 mmd.month,
                 mmd.consumption
@@ -778,17 +780,19 @@ def process_prediction_task(task_id: str):
 
         prediction_tasks[task_id] = {"status": "processing", "progress": 30, "message": "Pre-processing data..."}
 
-        sorted_parts = df_materials[['material_code', 'month', 'year', 'consumption', 'lead_time', 'delta', 'req_on_12m_avg']].sort_values(by='req_on_12m_avg', ascending=False)
+        sorted_parts = df_materials[['material_code', 'month', 'year', 'consumption', 'lead_time', 'delta', 'req_on_12m_avg', 'gpc_stk', 'lead_time_qty']].sort_values(by='req_on_12m_avg', ascending=False)
         sorted_parts['period'] = pd.to_datetime(sorted_parts[['year', 'month']].assign(day=1))
         
         dates = sorted_parts['period']
-        sample_consumption = sorted_parts[['material_code', 'consumption', 'lead_time', 'delta']]
+        sample_consumption = sorted_parts[['material_code', 'consumption', 'lead_time', 'delta', 'gpc_stk', 'lead_time_qty']]
 
         df_part = pd.DataFrame({
             'Material_Code': sample_consumption['material_code'],
             'Consumption': sample_consumption['consumption'],
             'lead_time': sample_consumption['lead_time'],
             'delta': sample_consumption['delta'],
+            'gpc_stk': sample_consumption['gpc_stk'],
+            'lead_time_qty': sample_consumption['lead_time_qty'],
         })
         df_part.index = dates
         df_part = df_part.sort_index()
@@ -931,14 +935,32 @@ def process_prediction_task(task_id: str):
                 m3_date = ff_dates[2].to_pydatetime().date() if len(ff_dates) > 2 else None
                 m3_pred = float(ff_vals[2]) if len(ff_vals) > 2 else 0.0
 
+                gpc_stk = float(res['gpc_stk'].iloc[0]) if len(res) > 0 and not pd.isna(res['gpc_stk'].iloc[0]) else 0.0
+                lead_time_qty = float(res['lead_time_qty'].iloc[0]) if len(res) > 0 and not pd.isna(res['lead_time_qty'].iloc[0]) else 0.0
+
+                m1_po = max(0.0, lead_time_qty - gpc_stk + m1_pred)
+                m1_mes = max(0.0, gpc_stk - m1_pred + m1_po)
+
+                m2_po = max(0.0, m1_po + m2_pred)
+                m2_mes = max(0.0, m1_mes + m2_po - m2_pred)
+
+                m3_po = max(0.0, m2_po + m3_pred)
+                m3_mes = max(0.0, m2_mes + m3_po - m3_pred)
+
                 prediction_records.append({
                     'material_code': mat_code,
                     'month1_date': m1_date,
                     'month1_prediction': m1_pred,
+                    'month1_po': m1_po,
+                    'month1_mes': m1_mes,
                     'month2_date': m2_date,
                     'month2_prediction': m2_pred,
+                    'month2_po': m2_po,
+                    'month2_mes': m2_mes,
                     'month3_date': m3_date,
-                    'month3_prediction': m3_pred
+                    'month3_prediction': m3_pred,
+                    'month3_po': m3_po,
+                    'month3_mes': m3_mes
                 })
             except Exception as item_err:
                 print(f"Error predicting for material {mat_code}: {item_err}")
@@ -946,10 +968,16 @@ def process_prediction_task(task_id: str):
                     'material_code': mat_code,
                     'month1_date': None,
                     'month1_prediction': 0.0,
+                    'month1_po': 0.0,
+                    'month1_mes': 0.0,
                     'month2_date': None,
                     'month2_prediction': 0.0,
+                    'month2_po': 0.0,
+                    'month2_mes': 0.0,
                     'month3_date': None,
-                    'month3_prediction': 0.0
+                    'month3_prediction': 0.0,
+                    'month3_po': 0.0,
+                    'month3_mes': 0.0
                 })
 
         prediction_tasks[task_id] = {"status": "processing", "progress": 90, "message": "Saving predictions to database..."}
