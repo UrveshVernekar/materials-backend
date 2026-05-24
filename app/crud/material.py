@@ -1,7 +1,11 @@
 # app/crud/material.py
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.sql import func
 from app.schemas.material import MaterialFilter
+from app.models.material_check import MaterialCheck
+from app.models.material import Material
 
 def get_dashboard_kpis(db: Session):
     query = text("""
@@ -61,7 +65,7 @@ def get_dashboard_kpis(db: Session):
 
 
 
-def get_filtered_materials(db: Session, filters: MaterialFilter):
+def get_filtered_materials(db: Session, filters: MaterialFilter, user_id: int):
     base_query = """
         WITH latest_months AS (
             SELECT 
@@ -122,16 +126,30 @@ def get_filtered_materials(db: Session, filters: MaterialFilter):
                 p.month3_mes_days,
                 p.month1_date,
                 p.month2_date,
-                p.month3_date
+                p.month3_date,
+                COALESCE(mc.is_checked, FALSE) as is_checked,
+                (
+                    SELECT COALESCE(json_agg(json_build_object(
+                        'email', u.email,
+                        'first_name', u.first_name,
+                        'last_name', u.last_name,
+                        'is_checked', COALESCE(mc_all.is_checked, FALSE),
+                        'checked_at', mc_all.checked_at,
+                        'unchecked_at', mc_all.unchecked_at
+                    )), '[]'::json)
+                    FROM users u
+                    LEFT JOIN material_checks mc_all ON u.id = mc_all.user_id AND mc_all.material_code = m.material_code
+                ) as checks
             FROM materials m
             LEFT JOIN calc_summary s ON m.material_code = s.material_code
             LEFT JOIN consumption_prediction p ON m.material_code = p.material_code
+            LEFT JOIN material_checks mc ON m.material_code = mc.material_code AND mc.user_id = :user_id
         )
         SELECT * FROM material_data
         WHERE 1=1
     """
     
-    params = {}
+    params = {'user_id': user_id}
     
     if filters.search:
         base_query += """
@@ -167,3 +185,39 @@ def get_filtered_materials(db: Session, filters: MaterialFilter):
     items = [dict(row._mapping) for row in result]
 
     return {"items": items, "total": total or 0}
+
+
+def toggle_material_check(db: Session, material_code: str, user_id: int, is_checked: bool):
+    # Verify material exists
+    material = db.query(Material).filter(Material.material_code == material_code).first()
+    if not material:
+        return None
+
+    # Check if a record already exists
+    db_check = db.query(MaterialCheck).filter(
+        MaterialCheck.material_code == material_code,
+        MaterialCheck.user_id == user_id
+    ).first()
+
+    now = datetime.now(timezone.utc)
+
+    if db_check:
+        db_check.is_checked = is_checked
+        if is_checked:
+            db_check.checked_at = now
+            db_check.unchecked_at = None
+        else:
+            db_check.unchecked_at = now
+    else:
+        db_check = MaterialCheck(
+            material_code=material_code,
+            user_id=user_id,
+            is_checked=is_checked,
+            checked_at=now if is_checked else None,
+            unchecked_at=None if is_checked else now
+        )
+        db.add(db_check)
+
+    db.commit()
+    db.refresh(db_check)
+    return db_check

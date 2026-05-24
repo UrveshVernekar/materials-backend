@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
 
 class KPICard(BaseModel):
     title: str
@@ -15,6 +15,14 @@ class DashboardKPIResponse(BaseModel):
     low_stock: int
     avg_coverage_days: float
     obsolete_count: int
+
+class UserCheckDetail(BaseModel):
+    email: str
+    first_name: str
+    last_name: str
+    is_checked: bool
+    checked_at: Optional[datetime] = None
+    unchecked_at: Optional[datetime] = None
 
 class MaterialTableRow(BaseModel):
     material_code: str
@@ -53,7 +61,20 @@ class MaterialTableRow(BaseModel):
     month1_date: Optional[date] = None
     month2_date: Optional[date] = None
     month3_date: Optional[date] = None
+    is_checked: bool = False
+    checks: List[UserCheckDetail] = []
 
 class DashboardTableResponse(BaseModel):
     items: List[MaterialTableRow]
     total: int
+
+class MaterialCheckRequest(BaseModel):
+    material_code: str
+    is_checked: bool
+
+class MaterialCheckResponse(BaseModel):
+    material_code: str
+    is_checked: bool
+    checked_at: Optional[datetime] = None
+    unchecked_at: Optional[datetime] = None
+    message: str

@@ -131,6 +131,19 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_po_period   ON purchase_orders (year, month, material_code);
     CREATE INDEX IF NOT EXISTS idx_po_date     ON purchase_orders (period_date);
 
+    CREATE TABLE IF NOT EXISTS material_checks (
+        id SERIAL PRIMARY KEY,
+        material_code VARCHAR(50) NOT NULL REFERENCES materials(material_code) ON DELETE CASCADE,
+        user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        is_checked BOOLEAN NOT NULL DEFAULT TRUE,
+        checked_at TIMESTAMPTZ DEFAULT NOW(),
+        unchecked_at TIMESTAMPTZ DEFAULT NULL,
+        UNIQUE(material_code, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_material_checks_code ON material_checks(material_code);
+    CREATE INDEX IF NOT EXISTS idx_material_checks_user ON material_checks(user_id);
+
     -- Ensure all columns exist for existing deployments
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS product_category VARCHAR(200) DEFAULT NULL;
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS product_status VARCHAR(100) DEFAULT NULL;

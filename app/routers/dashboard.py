@@ -1,14 +1,25 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.material import MaterialFilter
 from app.services.dashboard_service import get_dashboard_data, get_dashboard_table
-from app.schemas.dashboard import DashboardKPIResponse, DashboardTableResponse
+from app.schemas.dashboard import (
+    DashboardKPIResponse, 
+    DashboardTableResponse, 
+    MaterialCheckRequest, 
+    MaterialCheckResponse
+)
+from app.routers.auth import get_current_user
+from app.models.user import User
+from app.crud.material import toggle_material_check
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 @router.get("/kpis", response_model=DashboardKPIResponse)
-def get_kpis(db: Session = Depends(get_db)):
+def get_kpis(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     return get_dashboard_data(db)
 
 @router.get("/table", response_model=DashboardTableResponse)
@@ -18,7 +29,8 @@ def get_table(
     status: str = Query(None),
     min_coverage: float = Query(None),
     max_coverage: float = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     filters = MaterialFilter(
         search=search, 
@@ -27,4 +39,29 @@ def get_table(
         min_coverage=min_coverage, 
         max_coverage=max_coverage
     )
-    return get_dashboard_table(db, filters)
+    return get_dashboard_table(db, filters, user_id=current_user.id)
+
+@router.post("/check", response_model=MaterialCheckResponse)
+def check_material(
+    payload: MaterialCheckRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    db_check = toggle_material_check(
+        db, 
+        material_code=payload.material_code, 
+        user_id=current_user.id, 
+        is_checked=payload.is_checked
+    )
+    if not db_check:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Material with code {payload.material_code} not found"
+        )
+    return MaterialCheckResponse(
+        material_code=db_check.material_code,
+        is_checked=db_check.is_checked,
+        checked_at=db_check.checked_at,
+        unchecked_at=db_check.unchecked_at,
+        message="Material check status updated successfully"
+    )
