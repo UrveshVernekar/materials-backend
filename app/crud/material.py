@@ -5,23 +5,47 @@ from app.schemas.material import MaterialFilter
 
 def get_dashboard_kpis(db: Session):
     query = text("""
-        WITH categorized_materials AS (
+        WITH latest_months AS (
             SELECT 
-                cov_in_days,
+                material_code, 
+                consumption,
+                ROW_NUMBER() OVER(PARTITION BY material_code ORDER BY year DESC, month DESC) as rn
+            FROM material_monthly_data
+            WHERE consumption IS NOT NULL
+        ),
+        calc_summary AS (
+            SELECT 
+                material_code,
+                ROUND(AVG(CASE WHEN rn <= 12 THEN consumption END)::numeric, 2) as twelve_m_avg
+            FROM latest_months
+            GROUP BY material_code
+        ),
+        categorized_materials AS (
+            SELECT 
+                m.material_code,
+                m.gpc_stk,
+                s.twelve_m_avg,
                 CASE 
-                    WHEN inh_s_obslte = 'OBSOLETE' THEN 'Obsolete'
-                    WHEN last_production_year >= 2025 THEN 'New'
+                    WHEN m.product_status ILIKE '%obsolete%' OR m.product_status = 'NOT RUN' THEN 'Obsolete'
+                    WHEN m.product_status = 'New Part' THEN 'New'
                     ELSE 'Running' 
-                END as status
-            FROM materials
+                END as status,
+                CASE
+                    WHEN s.twelve_m_avg IS NOT NULL AND s.twelve_m_avg > 0 
+                        THEN (m.gpc_stk / s.twelve_m_avg) * 30
+                    WHEN m.gpc_stk > 0 THEN 999999
+                    ELSE 0
+                END as calculated_coverage
+            FROM materials m
+            LEFT JOIN calc_summary s ON m.material_code = s.material_code
         )
         SELECT 
             COUNT(*) as total_materials,
             COUNT(CASE WHEN status = 'Running' THEN 1 END) as active_materials,
             COUNT(CASE WHEN status = 'Obsolete' THEN 1 END) as obsolete_count,
-            COALESCE(AVG(cov_in_days), 0) as avg_coverage_days,
-            COUNT(CASE WHEN cov_in_days < 30 THEN 1 END) as critical_stock,
-            COUNT(CASE WHEN cov_in_days BETWEEN 30 AND 60 THEN 1 END) as low_stock
+            COALESCE(AVG(CASE WHEN status != 'Obsolete' AND calculated_coverage < 999999 THEN calculated_coverage END), 0) as avg_coverage_days,
+            COUNT(CASE WHEN calculated_coverage < 30 THEN 1 END) as critical_stock,
+            COUNT(CASE WHEN calculated_coverage >= 30 AND calculated_coverage <= 60 THEN 1 END) as low_stock
         FROM categorized_materials
     """)
     result = db.execute(query).fetchone()
@@ -34,6 +58,7 @@ def get_dashboard_kpis(db: Session):
         "critical_stock": result.critical_stock or 0,
         "low_stock": result.low_stock or 0,
     }
+
 
 
 def get_filtered_materials(db: Session, filters: MaterialFilter):
