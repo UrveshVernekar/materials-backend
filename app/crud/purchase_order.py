@@ -1,11 +1,12 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from app.models.purchase_order import PurchaseOrder
 from app.models.material import Material
 
 
 def get_purchase_orders_by_material(db: Session, material_code: str):
-    return db.query(PurchaseOrder).filter(PurchaseOrder.material_code == material_code).order_by(PurchaseOrder.year.desc(), PurchaseOrder.month.desc()).all()
+    return db.query(PurchaseOrder).options(joinedload(PurchaseOrder.user)).filter(PurchaseOrder.material_code == material_code).order_by(PurchaseOrder.year.desc(), PurchaseOrder.month.desc()).all()
+
 
 
 def get_purchase_order(db: Session, po_id: int):
@@ -16,7 +17,7 @@ def get_purchase_order_by_number(db: Session, po_number: str):
     return db.query(PurchaseOrder).filter(PurchaseOrder.po_number == po_number).first()
 
 
-def create_purchase_order(db: Session, po_data):
+def create_purchase_order(db: Session, po_data, user_id: int = None):
     material = db.query(Material).filter(Material.material_code == po_data.material_code).first()
     if not material:
         return None, f"Material '{po_data.material_code}' not found"
@@ -35,6 +36,7 @@ def create_purchase_order(db: Session, po_data):
         receive_qty=po_data.receive_qty,
         year=po_data.year,
         month=po_data.month,
+        user_id=user_id,
     )
     db.add(po)
     try:

@@ -107,6 +107,7 @@ def init_db():
         year            INT NOT NULL,
         month           INT NOT NULL CHECK (month BETWEEN 1 AND 12),
         period_date     DATE GENERATED ALWAYS AS (MAKE_DATE(year, month, 1)) STORED,
+        user_id         INT REFERENCES users(id) ON DELETE SET NULL,
         created_at      TIMESTAMPTZ DEFAULT NOW(),
         updated_at      TIMESTAMPTZ DEFAULT NOW(),
 
@@ -204,7 +205,9 @@ def init_db():
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
     ALTER TABLE consumption_prediction ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
+    ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS user_id INT REFERENCES users(id) ON DELETE SET NULL;
     """
+
     
     with engine.begin() as conn:
         conn.execute(text(INIT_SQL))

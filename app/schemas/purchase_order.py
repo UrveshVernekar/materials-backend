@@ -20,6 +20,14 @@ class PurchaseOrderUpdate(BaseModel):
     year: Optional[conint(ge=1900, le=2100)] = None
     month: Optional[conint(ge=1, le=12)] = None
 
+class PurchaseOrderUserResponse(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+
+    class Config:
+        orm_mode = True
+
 class PurchaseOrderResponse(BaseModel):
     id: int
     material_code: str
@@ -29,6 +37,8 @@ class PurchaseOrderResponse(BaseModel):
     year: int
     month: int
     period_date: Optional[date]
+    user_id: Optional[int] = None
+    user: Optional[PurchaseOrderUserResponse] = None
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
@@ -38,3 +48,4 @@ class PurchaseOrderResponse(BaseModel):
 class PurchaseOrderListResponse(BaseModel):
     items: list[PurchaseOrderResponse]
     total: int
+
