@@ -61,6 +61,15 @@ class MaterialTableRow(BaseModel):
     month1_date: Optional[date] = None
     month2_date: Optional[date] = None
     month3_date: Optional[date] = None
+    actual_month1_po: Optional[float] = None
+    actual_month1_mes: Optional[float] = None
+    actual_month1_mes_days: Optional[float] = None
+    actual_month2_po: Optional[float] = None
+    actual_month2_mes: Optional[float] = None
+    actual_month2_mes_days: Optional[float] = None
+    actual_month3_po: Optional[float] = None
+    actual_month3_mes: Optional[float] = None
+    actual_month3_mes_days: Optional[float] = None
     is_checked: bool = False
     checks: List[UserCheckDetail] = []
 

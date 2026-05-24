@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, Date, FetchedValue
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Date, FetchedValue, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -13,5 +14,9 @@ class PurchaseOrder(Base):
     year = Column(Integer, nullable=False)
     month = Column(Integer, nullable=False)
     period_date = Column(Date, FetchedValue())  # Populated by PostgreSQL (GENERATED ALWAYS AS)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User")
+

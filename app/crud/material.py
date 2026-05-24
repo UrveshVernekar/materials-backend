@@ -127,6 +127,27 @@ def get_filtered_materials(db: Session, filters: MaterialFilter, user_id: int):
                 p.month1_date,
                 p.month2_date,
                 p.month3_date,
+                (
+                    SELECT SUM(po.order_qty)
+                    FROM purchase_orders po
+                    WHERE po.material_code = m.material_code
+                      AND po.year = EXTRACT(YEAR FROM p.month1_date)
+                      AND po.month = EXTRACT(MONTH FROM p.month1_date)
+                ) as actual_month1_po,
+                (
+                    SELECT SUM(po.order_qty)
+                    FROM purchase_orders po
+                    WHERE po.material_code = m.material_code
+                      AND po.year = EXTRACT(YEAR FROM p.month2_date)
+                      AND po.month = EXTRACT(MONTH FROM p.month2_date)
+                ) as actual_month2_po,
+                (
+                    SELECT SUM(po.order_qty)
+                    FROM purchase_orders po
+                    WHERE po.material_code = m.material_code
+                      AND po.year = EXTRACT(YEAR FROM p.month3_date)
+                      AND po.month = EXTRACT(MONTH FROM p.month3_date)
+                ) as actual_month3_po,
                 COALESCE(mc.is_checked, FALSE) as is_checked,
                 (
                     SELECT COALESCE(json_agg(json_build_object(
@@ -182,7 +203,51 @@ def get_filtered_materials(db: Session, filters: MaterialFilter, user_id: int):
     
     result = db.execute(text(base_query), params).fetchall()
 
-    items = [dict(row._mapping) for row in result]
+    items = []
+    for row in result:
+        item = dict(row._mapping)
+        
+        # Get predictions
+        m1_pred = float(item.get("month1_prediction") or 0.0)
+        m2_pred = float(item.get("month2_prediction") or 0.0)
+        m3_pred = float(item.get("month3_prediction") or 0.0)
+        
+        # Get actual POs
+        act_m1_po = item.get("actual_month1_po")
+        act_m2_po = item.get("actual_month2_po")
+        act_m3_po = item.get("actual_month3_po")
+        
+        # Calculate actual MES values using actual POs if entered, else 0
+        act_m1_po_val = float(act_m1_po) if act_m1_po is not None else 0.0
+        act_m2_po_val = float(act_m2_po) if act_m2_po is not None else 0.0
+        act_m3_po_val = float(act_m3_po) if act_m3_po is not None else 0.0
+        
+        # Current stock
+        gpc_stk = float(item.get("current_stock") or 0.0)
+        
+        # Calculate actual MES
+        act_m1_mes = max(0.0, gpc_stk - m1_pred + act_m1_po_val)
+        act_m2_mes = max(0.0, act_m1_mes - m2_pred + act_m2_po_val)
+        act_m3_mes = max(0.0, act_m2_mes - m3_pred + act_m3_po_val)
+        
+        item["actual_month1_mes"] = act_m1_mes
+        item["actual_month2_mes"] = act_m2_mes
+        item["actual_month3_mes"] = act_m3_mes
+        
+        # Calculate actual MES in days
+        twelve_m_avg = float(item.get("twelve_m_avg") or 0.0)
+        daily_demand = twelve_m_avg / 30.0 if twelve_m_avg > 0 else 0.0
+        
+        if daily_demand > 0:
+            item["actual_month1_mes_days"] = act_m1_mes / daily_demand
+            item["actual_month2_mes_days"] = act_m2_mes / daily_demand
+            item["actual_month3_mes_days"] = act_m3_mes / daily_demand
+        else:
+            item["actual_month1_mes_days"] = 0.0
+            item["actual_month2_mes_days"] = 0.0
+            item["actual_month3_mes_days"] = 0.0
+            
+        items.append(item)
 
     return {"items": items, "total": total or 0}
 
