@@ -7,6 +7,6 @@ def get_dashboard_data(db: Session):
     kpis = get_dashboard_kpis(db)
     return DashboardKPIResponse(**kpis)
 
-def get_dashboard_table(db: Session, filters: MaterialFilter):
-    data = get_filtered_materials(db, filters)
+def get_dashboard_table(db: Session, filters: MaterialFilter, user_id: int):
+    data = get_filtered_materials(db, filters, user_id)
     return DashboardTableResponse(**data)
