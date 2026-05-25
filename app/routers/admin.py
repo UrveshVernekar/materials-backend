@@ -8,6 +8,7 @@ import uuid
 import csv
 
 upload_tasks = {}
+po_upload_tasks = {}
 
 def psql_insert_copy(table, conn, keys, data_iter):
     dbapi_conn = conn.connection
@@ -272,6 +273,58 @@ for db_col, aliases in SCHEMA_FIELDS.items():
     schema_embeddings[db_col] = embedding_model.encode(aliases)
 
 # =========================================================
+# PURCHASE ORDER SCHEMA DEFINITIONS
+# =========================================================
+PO_SCHEMA_FIELDS = {
+    "material_code": [
+        "material code",
+        "material",
+        "part code",
+        "item code",
+        "part number"
+    ],
+    "po_number": [
+        "po number",
+        "purchase order",
+        "purchase order number",
+        "po no",
+        "order number",
+        "po_number"
+    ],
+    "order_qty": [
+        "order qty",
+        "order quantity",
+        "ordered qty",
+        "ordered quantity",
+        "qty ordered",
+        "order_qty"
+    ],
+    "receive_qty": [
+        "receive qty",
+        "receive quantity",
+        "received qty",
+        "received quantity",
+        "recv qty",
+        "received",
+        "receive_qty"
+    ],
+    "year": [
+        "year",
+        "yr",
+        "po year"
+    ],
+    "month": [
+        "month",
+        "mo",
+        "po month"
+    ]
+}
+
+po_schema_embeddings = {}
+for db_col, aliases in PO_SCHEMA_FIELDS.items():
+    po_schema_embeddings[db_col] = embedding_model.encode(aliases)
+
+# =========================================================
 # COLUMN MATCHER
 # =========================================================
 def find_best_match(excel_col):
@@ -332,6 +385,75 @@ def find_best_match(excel_col):
     return best_field, best_score
 
 
+def find_best_match_po(excel_col):
+    normalized_excel = normalize_column(excel_col)
+    best_score = 0
+    best_field = None
+    excel_embedding = embedding_model.encode([normalized_excel])[0]
+
+    for db_col, aliases in PO_SCHEMA_FIELDS.items():
+        # EXACT MATCH BOOST
+        for alias in aliases:
+            normalized_alias = normalize_column(alias)
+            if normalized_excel == normalized_alias:
+                return db_col, 100
+
+        # FUZZY MATCH
+        fuzzy_score = max(
+            fuzz.token_sort_ratio(
+                normalized_excel,
+                normalize_column(alias)
+            )
+            for alias in aliases
+        )
+
+        # SEMANTIC MATCH
+        semantic_scores = cosine_similarity(
+            [excel_embedding],
+            po_schema_embeddings[db_col]
+        )[0]
+        semantic_score = max(semantic_scores) * 100
+
+        # COMBINED SCORE
+        final_score = fuzzy_score * 0.7 + semantic_score * 0.3
+
+        if final_score > best_score:
+            best_score = final_score
+            best_field = db_col
+
+    return best_field, best_score
+
+
+
+# =========================================================
+# PURCHASE ORDER UPLOAD API
+# =========================================================
+@router.get("/upload-pos/status/{task_id}")
+async def get_po_upload_status(task_id: str):
+    if task_id not in po_upload_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return po_upload_tasks[task_id]
+
+@router.post("/upload-pos")
+async def upload_pos_data(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=400,
+            detail="Only Excel files are allowed."
+        )
+
+    content = await file.read()
+    task_id = str(uuid.uuid4())
+    po_upload_tasks[task_id] = {"status": "processing", "progress": 0, "message": "Initializing upload..."}
+    
+    background_tasks.add_task(process_po_upload_task, task_id, content)
+    
+    return {
+        "message": "Upload started",
+        "task_id": task_id
+    }
+
+
 # =========================================================
 # MAIN UPLOAD API
 # =========================================================
@@ -359,6 +481,236 @@ async def upload_data(background_tasks: BackgroundTasks, file: UploadFile = File
         "message": "Upload started",
         "task_id": task_id
     }
+
+
+def process_po_upload_task(task_id: str, content: bytes):
+    try:
+        po_upload_tasks[task_id] = {"status": "processing", "progress": 10, "message": "Reading Excel file..."}
+
+        # READ EXCEL (defensively try 'IND', then first sheet)
+        try:
+            df_raw = pd.read_excel(
+                io.BytesIO(content),
+                sheet_name='IND',
+                header=None
+            )
+        except Exception:
+            try:
+                df_raw = pd.read_excel(
+                    io.BytesIO(content),
+                    sheet_name=0,
+                    header=None
+                )
+            except Exception as read_err:
+                raise Exception(f"Failed to read Excel sheets: {str(read_err)}")
+
+        po_upload_tasks[task_id] = {"status": "processing", "progress": 20, "message": "Finding header row..."}
+
+        # FIND HEADER ROW FOR PO
+        best_row_idx = 0
+        best_row_score = -1
+
+        for idx in range(min(30, len(df_raw))):
+            row_values = df_raw.iloc[idx].values
+            score = 0
+            for val in row_values:
+                if pd.isna(val):
+                    continue
+                norm_val = normalize_column(val)
+                if not norm_val:
+                    continue
+                for db_col, aliases in PO_SCHEMA_FIELDS.items():
+                    if any(normalize_column(a) == norm_val for a in aliases):
+                        score += 2
+                        break
+                    elif any(len(norm_val) > 3 and normalize_column(a) in norm_val for a in aliases):
+                        score += 1
+                        break
+            if score > best_row_score:
+                best_row_score = score
+                best_row_idx = idx
+
+        # Set best row as header row
+        header_row = df_raw.iloc[best_row_idx].copy()
+        cleaned_header_row = []
+        for i, val in enumerate(header_row):
+            if pd.isna(val):
+                cleaned_header_row.append(f"Unnamed_{i}")
+            else:
+                cleaned_header_row.append(str(val).strip())
+        header_row = cleaned_header_row
+
+        df = df_raw.copy()
+        df.columns = header_row
+        df = df.iloc[best_row_idx + 1:].reset_index(drop=True)
+
+        po_upload_tasks[task_id] = {"status": "processing", "progress": 40, "message": "Mapping columns..."}
+        column_mapping = {}
+        schema_field_scores = {}
+
+        for col in df.columns:
+            if col.startswith("Unnamed_"):
+                continue
+
+            best_field, score = find_best_match_po(col)
+            if score >= 65:
+                # Prevent duplicate mapping by keeping only highest score
+                if best_field in schema_field_scores:
+                    if score > schema_field_scores[best_field]:
+                        keys_to_remove = [k for k, v in column_mapping.items() if v == best_field]
+                        for k in keys_to_remove:
+                            del column_mapping[k]
+                        column_mapping[col] = best_field
+                        schema_field_scores[best_field] = score
+                else:
+                    column_mapping[col] = best_field
+                    schema_field_scores[best_field] = score
+
+        # Check required columns
+        required_fields = ["material_code", "po_number", "order_qty", "year", "month"]
+        missing_fields = [f for f in required_fields if f not in column_mapping.values()]
+        if missing_fields:
+            raise Exception(f"Required column(s) not identified: {', '.join(missing_fields)}")
+
+        po_upload_tasks[task_id] = {"status": "processing", "progress": 60, "message": "Parsing purchase orders data..."}
+        
+        # Keep only identified columns
+        mapped_df = df[list(column_mapping.keys())].copy()
+        mapped_df.rename(columns=column_mapping, inplace=True)
+
+        # Drop rows where material_code or po_number is null/empty
+        mapped_df.dropna(subset=["material_code", "po_number"], inplace=True)
+        mapped_df = mapped_df[mapped_df["material_code"].astype(str).str.strip() != ""]
+        mapped_df = mapped_df[mapped_df["po_number"].astype(str).str.strip() != ""]
+
+        # Parse Month
+        month_names_map = {
+            'january': 1, 'jan': 1,
+            'february': 2, 'feb': 2,
+            'march': 3, 'mar': 3,
+            'april': 4, 'apr': 4,
+            'may': 5,
+            'june': 6, 'jun': 6,
+            'july': 7, 'jul': 7,
+            'august': 8, 'aug': 8,
+            'september': 9, 'sep': 9,
+            'october': 10, 'oct': 10,
+            'november': 11, 'nov': 11,
+            'december': 12, 'dec': 12
+        }
+
+        def parse_month_val(m_val):
+            if pd.isna(m_val):
+                return None
+            m_str = str(m_val).strip().lower()
+            if m_str.isdigit():
+                val = int(m_str)
+                return val if 1 <= val <= 12 else None
+            return month_names_map.get(m_str)
+
+        mapped_df["month"] = mapped_df["month"].apply(parse_month_val)
+        mapped_df.dropna(subset=["month"], inplace=True)
+        mapped_df["month"] = mapped_df["month"].astype(int)
+
+        # Parse Year
+        def parse_year_val(y_val):
+            if pd.isna(y_val):
+                return None
+            y_str = str(y_val).strip()
+            if y_str.replace(".0", "").isdigit():
+                val = int(float(y_str))
+                return val if 1900 <= val <= 2100 else None
+            return None
+
+        mapped_df["year"] = mapped_df["year"].apply(parse_year_val)
+        mapped_df.dropna(subset=["year"], inplace=True)
+        mapped_df["year"] = mapped_df["year"].astype(int)
+
+        # Parse Order Qty
+        mapped_df["order_qty"] = pd.to_numeric(mapped_df["order_qty"], errors='coerce').fillna(0.0)
+
+        # Parse Receive Qty
+        if "receive_qty" in mapped_df.columns:
+            mapped_df["receive_qty"] = pd.to_numeric(mapped_df["receive_qty"], errors='coerce').fillna(0.0)
+        else:
+            mapped_df["receive_qty"] = 0.0
+
+        # Enforce receive_qty <= order_qty constraint defensively
+        mapped_df["receive_qty"] = np.minimum(mapped_df["receive_qty"], mapped_df["order_qty"])
+
+        # Drop duplicates on po_number to respect unique constraint
+        mapped_df.drop_duplicates(subset=["po_number"], inplace=True)
+
+        po_upload_tasks[task_id] = {"status": "processing", "progress": 80, "message": "Saving to database..."}
+
+        with engine.begin() as conn:
+            # Create a temporary staging table
+            conn.execute(text("""
+                CREATE TEMP TABLE temp_po_import (
+                    material_code   VARCHAR(50) NOT NULL,
+                    po_number       VARCHAR(255) NOT NULL,
+                    order_qty       NUMERIC DEFAULT 0,
+                    receive_qty     NUMERIC DEFAULT 0,
+                    year            INT NOT NULL,
+                    month           INT NOT NULL
+                ) ON COMMIT DROP;
+            """))
+
+            if not mapped_df.empty:
+                db_cols = ["material_code", "po_number", "order_qty", "receive_qty", "year", "month"]
+                db_df = mapped_df[db_cols].copy()
+                
+                db_df.to_sql(
+                    'temp_po_import',
+                    con=conn,
+                    if_exists='append',
+                    index=False,
+                    method=psql_insert_copy
+                )
+
+                # Update existing PO records by matching on material_code, year, and month
+                conn.execute(text("""
+                    UPDATE purchase_orders po
+                    SET po_number = t.po_number,
+                        order_qty = t.order_qty,
+                        receive_qty = t.receive_qty,
+                        updated_at = NOW()
+                    FROM temp_po_import t
+                    WHERE po.material_code = t.material_code
+                      AND po.year = t.year
+                      AND po.month = t.month;
+                """))
+
+                # Insert new PO records
+                conn.execute(text("""
+                    INSERT INTO purchase_orders (material_code, po_number, order_qty, receive_qty, year, month)
+                    SELECT t.material_code, t.po_number, t.order_qty, t.receive_qty, t.year, t.month
+                    FROM temp_po_import t
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM purchase_orders po
+                        WHERE po.material_code = t.material_code
+                          AND po.year = t.year
+                          AND po.month = t.month
+                    );
+                """))
+
+        po_upload_tasks[task_id] = {
+            "status": "completed",
+            "progress": 100,
+            "message": "Purchase Orders imported successfully",
+            "pos_count": len(mapped_df)
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        po_upload_tasks[task_id] = {
+            "status": "failed",
+            "progress": 0,
+            "message": "Import failed",
+            "error": str(e)
+        }
+
 
 def process_upload_task(task_id: str, content: bytes):
     try:
