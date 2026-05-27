@@ -9,6 +9,7 @@ import csv
 
 upload_tasks = {}
 po_upload_tasks = {}
+alternative_upload_tasks = {}
 
 def psql_insert_copy(table, conn, keys, data_iter):
     dbapi_conn = conn.connection
@@ -325,6 +326,43 @@ for db_col, aliases in PO_SCHEMA_FIELDS.items():
     po_schema_embeddings[db_col] = embedding_model.encode(aliases)
 
 # =========================================================
+# ALTERNATIVE PARTS SCHEMA DEFINITIONS
+# =========================================================
+ALTERNATIVE_SCHEMA_FIELDS = {
+    "master_code": [
+        "master code",
+        "master material",
+        "master_material",
+        "master mat",
+        "master"
+    ],
+    "master_mat_desc": [
+        "master material description",
+        "master mat description",
+        "master mat desc",
+        "master desc",
+        "master description"
+    ],
+    "substitute": [
+        "substitute",
+        "substitute mat",
+        "subs material"
+    ],
+    "substitute_mat_desc": [
+        "substitute material description",
+        "substitute mat description",
+        "substitute mat desc",
+        "substitute desc",
+        "substitute description"
+    ]
+}
+
+alternative_schema_embeddings = {}
+for db_col, aliases in ALTERNATIVE_SCHEMA_FIELDS.items():
+    alternative_schema_embeddings[db_col] = embedding_model.encode(aliases)
+
+
+# =========================================================
 # COLUMN MATCHER
 # =========================================================
 def find_best_match(excel_col):
@@ -424,6 +462,98 @@ def find_best_match_po(excel_col):
     return best_field, best_score
 
 
+def find_best_matches(excel_col, SCHEMA_WITH_FIELDS):
+
+    normalized_excel = normalize_column(excel_col)
+
+    best_score = 0
+    best_field = None
+
+    excel_embedding = embedding_model.encode([normalized_excel])[0]
+    
+    local_schema_embeddings = {}
+
+    for db_col, aliases in SCHEMA_WITH_FIELDS.items():
+        local_schema_embeddings[db_col] = embedding_model.encode(aliases)
+
+    for db_col, aliases in SCHEMA_WITH_FIELDS.items():
+
+        # ==========================================
+        # EXACT MATCH BOOST
+        # ==========================================
+        for alias in aliases:
+
+            normalized_alias = normalize_column(alias)
+
+            if normalized_excel == normalized_alias:
+                return db_col, 100
+
+        # ==========================================
+        # FUZZY MATCH
+        # ==========================================
+        fuzzy_score = max(
+            fuzz.token_sort_ratio(
+                normalized_excel,
+                normalize_column(alias)
+            )
+            for alias in aliases
+        )
+
+        # ==========================================
+        # SEMANTIC MATCH
+        # ==========================================
+        
+        semantic_scores = cosine_similarity(
+            [excel_embedding],
+            local_schema_embeddings[db_col]
+        )[0]
+
+        semantic_score = max(semantic_scores) * 100
+
+        # ==========================================
+        # COMBINED SCORE
+        # ==========================================
+        final_score = (
+            fuzzy_score * 0.7
+            +
+            semantic_score * 0.3
+        )
+
+        if final_score > best_score:
+            best_score = final_score
+            best_field = db_col
+
+    return best_field, best_score
+
+
+# =========================================================
+# ALTERNATIVE PARTS UPLOAD API
+# =========================================================
+@router.get("/upload-alternatives/status/{task_id}")
+async def get_alternative_upload_status(task_id: str):
+    if task_id not in alternative_upload_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return alternative_upload_tasks[task_id]
+
+@router.post("/upload-alternatives")
+async def upload_alternatives_data(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=400,
+            detail="Only Excel files are allowed."
+        )
+
+    content = await file.read()
+    task_id = str(uuid.uuid4())
+    po_upload_tasks[task_id] = {"status": "processing", "progress": 0, "message": "Initializing upload..."}
+    
+    background_tasks.add_task(process_alternative_upload_task, task_id, content)
+    
+    return {
+        "message": "Upload started",
+        "task_id": task_id
+    }
+
 
 # =========================================================
 # PURCHASE ORDER UPLOAD API
@@ -481,6 +611,170 @@ async def upload_data(background_tasks: BackgroundTasks, file: UploadFile = File
         "message": "Upload started",
         "task_id": task_id
     }
+
+
+
+def process_alternative_upload_task(task_id: str, content: bytes):
+    try:
+        alternative_upload_tasks[task_id] = {"status": "processing", "progress": 10, "message": "Reading Excel file..."}
+
+        # READ EXCEL (defensively try 'IND', then first sheet)
+        try:
+            df_raw = pd.read_excel(
+                io.BytesIO(content),
+                sheet_name='IND',
+                header=None
+            )
+        except Exception:
+            try:
+                df_raw = pd.read_excel(
+                    io.BytesIO(content),
+                    sheet_name=0,
+                    header=None
+                )
+            except Exception as read_err:
+                raise Exception(f"Failed to read Excel sheets: {str(read_err)}")
+
+        alternative_upload_tasks[task_id] = {"status": "processing", "progress": 20, "message": "Finding header row..."}
+
+        # FIND HEADER ROW FOR ALTERNATIVE
+        best_row_idx = 0
+        best_row_score = -1
+
+        for idx in range(min(30, len(df_raw))):
+            row_values = df_raw.iloc[idx].values
+            score = 0
+            for val in row_values:
+                if pd.isna(val):
+                    continue
+                norm_val = normalize_column(val)
+                if not norm_val:
+                    continue
+                for db_col, aliases in ALTERNATIVE_SCHEMA_FIELDS.items():
+                    if any(normalize_column(a) == norm_val for a in aliases):
+                        score += 2
+                        break
+                    elif any(len(norm_val) > 3 and normalize_column(a) in norm_val for a in aliases):
+                        score += 1
+                        break
+            if score > best_row_score:
+                best_row_score = score
+                best_row_idx = idx
+
+        # Set best row as header row
+        header_row = df_raw.iloc[best_row_idx].copy()
+        cleaned_header_row = []
+        for i, val in enumerate(header_row):
+            if pd.isna(val):
+                cleaned_header_row.append(f"Unnamed_{i}")
+            else:
+                cleaned_header_row.append(str(val).strip())
+        header_row = cleaned_header_row
+
+        df = df_raw.copy()
+        df.columns = header_row
+        df = df.iloc[best_row_idx + 1:].reset_index(drop=True)
+
+        alternative_upload_tasks[task_id] = {"status": "processing", "progress": 40, "message": "Mapping columns..."}
+        column_mapping = {}
+        schema_field_scores = {}
+
+        for col in df.columns:
+            if col.startswith("Unnamed_"):
+                continue
+
+            best_field, score = find_best_matches(col, ALTERNATIVE_SCHEMA_FIELDS)
+            if score >= 65:
+                # Prevent duplicate mapping by keeping only highest score
+                if best_field in schema_field_scores:
+                    if score > schema_field_scores[best_field]:
+                        keys_to_remove = [k for k, v in column_mapping.items() if v == best_field]
+                        for k in keys_to_remove:
+                            del column_mapping[k]
+                        column_mapping[col] = best_field
+                        schema_field_scores[best_field] = score
+                else:
+                    column_mapping[col] = best_field
+                    schema_field_scores[best_field] = score
+
+        # Check required columns
+        required_fields = ["master_code", "master_mat_desc", "substitute", "substitute_mat_desc"]
+        missing_fields = [f for f in required_fields if f not in column_mapping.values()]
+        if missing_fields:
+            raise Exception(f"Required column(s) not identified: {', '.join(missing_fields)}")
+
+        alternative_upload_tasks[task_id] = {"status": "processing", "progress": 60, "message": "Parsing alternative parts data..."}
+        
+        # Keep only identified columns
+        mapped_df = df[list(column_mapping.keys())].copy()
+        mapped_df.rename(columns=column_mapping, inplace=True)
+
+        alternative_upload_tasks[task_id] = {"status": "processing", "progress": 80, "message": "Saving to database..."}
+
+        with engine.begin() as conn:
+            # Create a temporary staging table
+            conn.execute(text("""
+                CREATE TEMP TABLE temp_alternative_import (
+                    master_code VARCHAR(50) NOT NULL,
+                    master_mat_desc VARCHAR(255) NOT NULL,
+                    substitute VARCHAR(50) NOT NULL,
+                    substitute_mat_desc VARCHAR(255) NOT NULL
+                ) ON COMMIT DROP;
+            """))
+
+            if not mapped_df.empty:
+                db_cols = ["master_code", "master_mat_desc", "substitute", "substitute_mat_desc"]
+                db_df = mapped_df[db_cols].copy()
+                
+                db_df.to_sql(
+                    'temp_alternative_import',
+                    con=conn,
+                    if_exists='append',
+                    index=False,
+                    method=psql_insert_copy
+                )
+
+                # Update existing ALTERNATIVE records by matching on material_code, year, and month
+                conn.execute(text("""
+                    UPDATE alternative_parts ap
+                    SET master_code = t.master_code,
+                        master_mat_desc = t.master_mat_desc,
+                        substitute = t.substitute,
+                        substitute_mat_desc = t.substitute_mat_desc,
+                        updated_at = NOW()
+                    FROM temp_alternative_import t
+                    WHERE ap.substitute = t.substitute;
+                """))
+
+                # Insert new ALTERNATIVE PART records
+                conn.execute(text("""
+                    INSERT INTO alternative_parts (master_code, master_mat_desc, substitute, substitute_mat_desc)
+                    SELECT t.master_code, t.master_mat_desc, t.substitute, t.substitute_mat_desc
+                    FROM temp_alternative_import t
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM alternative_parts ap
+                        WHERE ap.substitute = t.substitute
+                    );
+                """))
+
+        alternative_upload_tasks[task_id] = {
+            "status": "completed",
+            "progress": 100,
+            "message": "Alternative Orders imported successfully",
+            "pos_count": len(mapped_df)
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        alternative_upload_tasks[task_id] = {
+            "status": "failed",
+            "progress": 0,
+            "message": "Import failed",
+            "error": str(e)
+        }
+
+
 
 
 def process_po_upload_task(task_id: str, content: bytes):

@@ -145,6 +145,36 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_material_checks_code ON material_checks(material_code);
     CREATE INDEX IF NOT EXISTS idx_material_checks_user ON material_checks(user_id);
 
+    CREATE TABLE IF NOT EXISTS ALTERNATIVE_PARTS (
+        id                  INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        master_code         VARCHAR(50) NOT NULL,
+        master_mat_desc     VARCHAR(255) NOT NULL,
+        substitute          VARCHAR(255) NOT NULL UNIQUE,
+        substitute_mat_desc VARCHAR(255) NOT NULL,
+        created_at      TIMESTAMPTZ DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    /* CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            NEW.updated_at = NOW();
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    */
+    
+    DROP TRIGGER IF EXISTS set_substitute_master_updated_at ON alternative_parts;
+    CREATE TRIGGER set_substitute_master_updated_at
+        BEFORE UPDATE ON alternative_parts
+        FOR EACH ROW
+        EXECUTE FUNCTION trigger_set_timestamp();
+
+    CREATE INDEX IF NOT EXISTS idx_alternative_material ON alternative_parts (substitute);
+    -- CREATE INDEX IF NOT EXISTS idx_po_period   ON purchase_orders (year, month, material_code);
+    -- CREATE INDEX IF NOT EXISTS idx_po_date     ON purchase_orders (period_date);
+
+
     -- Ensure all columns exist for existing deployments
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS product_category VARCHAR(200) DEFAULT NULL;
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS product_status VARCHAR(100) DEFAULT NULL;
