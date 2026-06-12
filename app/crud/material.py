@@ -106,6 +106,7 @@ def get_filtered_materials(db: Session, filters: MaterialFilter, user_id: int):
                 -- END as status,
                 m.product_status AS status,
                 m.product_category,
+                m.remarks,
                 p.month1_prediction,
                 p.month1_prediction_days,
                 p.month1_po,
@@ -285,4 +286,14 @@ def toggle_material_check(db: Session, material_code: str, user_id: int, is_chec
 
     db.commit()
     db.refresh(db_check)
-    return db_check
+    return db_check
+
+
+def update_material_remarks(db: Session, material_code: str, remarks: str | None):
+    material = db.query(Material).filter(Material.material_code == material_code).first()
+    if not material:
+        return None
+    material.remarks = remarks
+    db.commit()
+    db.refresh(material)
+    return material

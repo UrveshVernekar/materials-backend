@@ -72,6 +72,7 @@ class MaterialTableRow(BaseModel):
     actual_month3_mes_days: Optional[float] = None
     is_checked: bool = False
     checks: List[UserCheckDetail] = []
+    remarks: Optional[str] = None
 
 class DashboardTableResponse(BaseModel):
     items: List[MaterialTableRow]
@@ -86,4 +87,13 @@ class MaterialCheckResponse(BaseModel):
     is_checked: bool
     checked_at: Optional[datetime] = None
     unchecked_at: Optional[datetime] = None
+    message: str
+
+class MaterialRemarksRequest(BaseModel):
+    material_code: str
+    remarks: Optional[str] = None
+
+class MaterialRemarksResponse(BaseModel):
+    material_code: str
+    remarks: Optional[str] = None
     message: str

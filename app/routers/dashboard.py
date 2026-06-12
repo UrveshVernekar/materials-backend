@@ -7,11 +7,13 @@ from app.schemas.dashboard import (
     DashboardKPIResponse, 
     DashboardTableResponse, 
     MaterialCheckRequest, 
-    MaterialCheckResponse
+    MaterialCheckResponse,
+    MaterialRemarksRequest,
+    MaterialRemarksResponse
 )
 from app.routers.auth import get_current_user
 from app.models.user import User
-from app.crud.material import toggle_material_check
+from app.crud.material import toggle_material_check, update_material_remarks
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -64,4 +66,26 @@ def check_material(
         checked_at=db_check.checked_at,
         unchecked_at=db_check.unchecked_at,
         message="Material check status updated successfully"
+    )
+
+@router.post("/remarks", response_model=MaterialRemarksResponse)
+def update_remarks(
+    payload: MaterialRemarksRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    db_material = update_material_remarks(
+        db,
+        material_code=payload.material_code,
+        remarks=payload.remarks
+    )
+    if not db_material:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Material with code {payload.material_code} not found"
+        )
+    return MaterialRemarksResponse(
+        material_code=db_material.material_code,
+        remarks=db_material.remarks,
+        message="Remarks updated successfully"
     )
