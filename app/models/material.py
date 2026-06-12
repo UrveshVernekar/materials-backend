@@ -26,5 +26,7 @@ class Material(Base):
     branch_stk = Column(Numeric(12, 2))
     po_balance = Column(Numeric(12, 2))
     
+    remarks = Column(String(1000), nullable=True)
+    
     # ... Add others as needed for KPIs
     created_at = Column(DateTime(timezone=True), server_default=func.now())
