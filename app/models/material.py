@@ -25,6 +25,7 @@ class Material(Base):
     gpc_free_stk = Column(Numeric(12, 2))
     branch_stk = Column(Numeric(12, 2))
     po_balance = Column(Numeric(12, 2))
+    pending_reorders = Column(Numeric(12, 2), default=0)
     
     remarks = Column(String(1000), nullable=True)
     

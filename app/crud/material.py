@@ -93,6 +93,7 @@ def get_filtered_materials(db: Session, filters: MaterialFilter, user_id: int):
                 m.gpc_stk as current_stock,
                 COALESCE(m.lead_time, 0) as lead_time,
                 COALESCE(m.lead_time_qty, 0) as lead_time_qty,
+                COALESCE(m.pending_reorders, 0) as pending_reorders,
                 COALESCE(m.delta, 0) as delta,
                 (COALESCE(m.lead_time, 0) + COALESCE(m.delta, 0)) as total_lead_time,
                 m.cov_in_days as coverage_days,

@@ -33,6 +33,7 @@ class MaterialTableRow(BaseModel):
     coverage_days: Optional[float] = 0
     lead_time: Optional[float] = 0
     lead_time_qty: Optional[float] = 0
+    pending_reorders: Optional[float] = 0
     delta: Optional[float] = 0
     total_lead_time: Optional[float] = 0
     three_m_avg: Optional[float] = 0
