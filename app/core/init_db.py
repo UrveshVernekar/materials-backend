@@ -36,6 +36,7 @@ def init_db():
         delta INT DEFAULT 0,
         cov_in_days NUMERIC,
         branch_pend NUMERIC,
+        pending_reorders NUMERIC DEFAULT 0,
         no_trace_damage NUMERIC,
         po_balance NUMERIC,
         gpc_stk NUMERIC,
@@ -193,6 +194,7 @@ def init_db():
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS delta INT DEFAULT 0;
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS cov_in_days NUMERIC;
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS branch_pend NUMERIC;
+    ALTER TABLE materials ADD COLUMN IF NOT EXISTS pending_reorders NUMERIC DEFAULT 0;
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS no_trace_damage NUMERIC;
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS po_balance NUMERIC;
     ALTER TABLE materials ADD COLUMN IF NOT EXISTS gpc_stk NUMERIC;

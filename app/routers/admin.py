@@ -198,7 +198,14 @@ SCHEMA_FIELDS = {
     "branch_pend": [
         "branch pend 22.04",
         "branch pend 21.04",
-        "branch pending"
+        "branch pend"
+    ],
+
+    "pending_reorders": [
+        "pending orders",
+        "branch pending",
+        "branch pending order",
+        "pending_reorders"
     ],
 
     "no_trace_damage": [
@@ -1140,7 +1147,7 @@ def process_upload_task(task_id: str, content: bytes):
         NUMERIC_FIELDS = [
             "machine_population", "last_production_year", "serv_per_left",
             "inh", "price", "moq", "cov_in_days", "branch_pend",
-            "no_trace_damage", "po_balance", "gpc_stk",
+            "pending_reorders", "no_trace_damage", "po_balance", "gpc_stk",
             "gpc_free_stk", "branch_stk", "for_1_day_req",
             "stk_in_alt_part", "req_on_12m_avg", "req_on_03m_avg",
             "average", "aging_more_than_120_days",
@@ -1150,6 +1157,11 @@ def process_upload_task(task_id: str, content: bytes):
         for col in NUMERIC_FIELDS:
             if col in materials_df.columns:
                 materials_df[col] = pd.to_numeric(materials_df[col], errors='coerce')
+
+        if "pending_reorders" not in materials_df.columns:
+            materials_df["pending_reorders"] = 0.0
+        else:
+            materials_df["pending_reorders"] = materials_df["pending_reorders"].fillna(0.0)
 
         # =====================================================
         # CLEAN DATA
