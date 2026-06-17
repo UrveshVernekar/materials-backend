@@ -74,6 +74,11 @@ class MaterialTableRow(BaseModel):
     is_checked: bool = False
     checks: List[UserCheckDetail] = []
     remarks: Optional[str] = None
+    alternative_parts: List["AlternativePart"] = []
+
+class AlternativePart(BaseModel):
+    part_code: str
+    part_description: str
 
 class DashboardTableResponse(BaseModel):
     items: List[MaterialTableRow]
