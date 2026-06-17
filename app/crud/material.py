@@ -251,6 +251,57 @@ def get_filtered_materials(db: Session, filters: MaterialFilter, user_id: int):
             
         items.append(item)
 
+    # Fetch and map alternative parts
+    try:
+        alt_query = text("""
+            SELECT master_code, master_mat_desc, substitute, substitute_mat_desc
+            FROM alternative_parts
+        """)
+        alt_rows = db.execute(alt_query).fetchall()
+        
+        # Map to store group members: master_code -> dict of part_code -> description
+        groups = {}
+        # Map to store substitute's master: substitute_code -> master_code
+        substitute_to_master = {}
+        
+        for row in alt_rows:
+            m_code = row.master_code
+            m_desc = row.master_mat_desc
+            s_code = row.substitute
+            s_desc = row.substitute_mat_desc
+            
+            if m_code not in groups:
+                groups[m_code] = {m_code: m_desc}
+            groups[m_code][s_code] = s_desc
+            substitute_to_master[s_code] = m_code
+
+        for item in items:
+            code = item["material_code"]
+            alternatives = {}
+            
+            # 1. If it's a master code, add all its substitutes
+            if code in groups:
+                for part_code, part_desc in groups[code].items():
+                    if part_code != code:
+                        alternatives[part_code] = part_desc
+                        
+            # 2. If it's a substitute code, add its master and sibling substitutes
+            if code in substitute_to_master:
+                m_code = substitute_to_master[code]
+                if m_code in groups:
+                    for part_code, part_desc in groups[m_code].items():
+                        if part_code != code:
+                            alternatives[part_code] = part_desc
+                            
+            item["alternative_parts"] = [
+                {"part_code": pc, "part_description": pd}
+                for pc, pd in alternatives.items()
+            ]
+    except Exception as e:
+        print(f"Error mapping alternative parts: {e}")
+        for item in items:
+            item["alternative_parts"] = []
+
     return {"items": items, "total": total or 0}
 
 
