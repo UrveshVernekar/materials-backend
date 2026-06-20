@@ -7,3 +7,4 @@ class MaterialFilter(BaseModel):
     status: Optional[str] = None
     min_coverage: Optional[float] = None
     max_coverage: Optional[float] = None
+    part_type: Optional[str] = None

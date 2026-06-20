@@ -75,6 +75,7 @@ class MaterialTableRow(BaseModel):
     checks: List[UserCheckDetail] = []
     remarks: Optional[str] = None
     alternative_parts: List["AlternativePart"] = []
+    part_type: Optional[str] = "Independent"
 
 class AlternativePart(BaseModel):
     part_code: str
