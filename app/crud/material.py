@@ -270,6 +270,9 @@ def get_filtered_materials(db: Session, filters: MaterialFilter, user_id: int):
             s_code = row.substitute
             s_desc = row.substitute_mat_desc
             
+            if m_code == s_code:
+                continue
+                
             if m_code not in groups:
                 groups[m_code] = {m_code: m_desc}
             groups[m_code][s_code] = s_desc
@@ -279,19 +282,19 @@ def get_filtered_materials(db: Session, filters: MaterialFilter, user_id: int):
             code = item["material_code"]
             alternatives = {}
             
+            # Determine part type
+            if code in groups:
+                item["part_type"] = "Master"
+            elif code in substitute_to_master:
+                item["part_type"] = "Substitute"
+            else:
+                item["part_type"] = "Independent"
+            
             # 1. If it's a master code, add all its substitutes
             if code in groups:
                 for part_code, part_desc in groups[code].items():
                     if part_code != code:
                         alternatives[part_code] = part_desc
-                        
-            # 2. If it's a substitute code, add its master and sibling substitutes
-            if code in substitute_to_master:
-                m_code = substitute_to_master[code]
-                if m_code in groups:
-                    for part_code, part_desc in groups[m_code].items():
-                        if part_code != code:
-                            alternatives[part_code] = part_desc
                             
             item["alternative_parts"] = [
                 {"part_code": pc, "part_description": pd}
@@ -301,6 +304,12 @@ def get_filtered_materials(db: Session, filters: MaterialFilter, user_id: int):
         print(f"Error mapping alternative parts: {e}")
         for item in items:
             item["alternative_parts"] = []
+            item["part_type"] = "Independent"
+
+    # Apply part_type filter if provided
+    if filters.part_type:
+        items = [item for item in items if item.get("part_type") == filters.part_type]
+        total = len(items)
 
     return {"items": items, "total": total or 0}
 

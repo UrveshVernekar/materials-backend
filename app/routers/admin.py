@@ -32,6 +32,83 @@ def psql_insert_copy(table, conn, keys, data_iter):
         sql = f'COPY {table_name} ({columns}) FROM STDIN WITH CSV'
         cur.copy_expert(sql=sql, file=s_buf)
 
+def refresh_merged_materials(conn):
+    query = """
+    TRUNCATE TABLE merged_materials;
+
+    WITH
+    -- Get all unique periods present in the monthly data
+    periods AS (
+        SELECT DISTINCT year, month FROM material_monthly_data
+    ),
+    -- Classify each material and find its master
+    classified AS (
+        SELECT 
+            m.material_code,
+            m.material_description,
+            m.vendor,
+            COALESCE(m.gpc_stk, 0) as own_stock,
+            CASE 
+                WHEN EXISTS (SELECT 1 FROM alternative_parts WHERE master_code = m.material_code AND substitute != master_code) THEN 'Master'
+                WHEN EXISTS (SELECT 1 FROM alternative_parts WHERE substitute = m.material_code AND substitute != master_code) THEN 'Substitute'
+                ELSE 'Independent'
+            END as part_type,
+            (SELECT master_code FROM alternative_parts WHERE substitute = m.material_code AND substitute != master_code) as master_code
+        FROM materials m
+    ),
+    -- Cross-join all materials with all periods
+    material_periods AS (
+        SELECT 
+            c.*,
+            p.year,
+            p.month
+        FROM classified c
+        CROSS JOIN periods p
+    ),
+    -- Join with actual monthly consumption data
+    monthly_data_mapped AS (
+        SELECT 
+            mp.*,
+            COALESCE(mmd.consumption, 0) as own_consumption
+        FROM material_periods mp
+        LEFT JOIN material_monthly_data mmd 
+            ON mp.material_code = mmd.material_code 
+           AND mp.year = mmd.year 
+           AND mp.month = mmd.month
+    )
+    -- Insert into merged_materials
+    INSERT INTO merged_materials (
+        material_code, material_description, vendor, part_type, master_code,
+        own_stock, combined_stock,
+        year, month,
+        own_consumption, combined_consumption
+    )
+    SELECT 
+        m.material_code,
+        m.material_description,
+        m.vendor,
+        m.part_type,
+        m.master_code,
+        m.own_stock,
+        -- combined stock calculation
+        CASE 
+            WHEN m.part_type = 'Master' THEN 
+                m.own_stock + COALESCE((SELECT SUM(own_stock) FROM classified WHERE master_code = m.material_code), 0)
+            ELSE m.own_stock
+        END as combined_stock,
+        m.year,
+        m.month,
+        m.own_consumption,
+        -- combined consumption calculation
+        CASE 
+            WHEN m.part_type = 'Master' THEN 
+                m.own_consumption + COALESCE((SELECT SUM(own_consumption) FROM monthly_data_mapped WHERE master_code = m.material_code AND year = m.year AND month = m.month), 0)
+            ELSE m.own_consumption
+        END as combined_consumption
+    FROM monthly_data_mapped m;
+    """
+    conn.execute(text(query))
+
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -764,6 +841,9 @@ def process_alternative_upload_task(task_id: str, content: bytes):
                         WHERE ap.substitute = t.substitute
                     );
                 """))
+                
+                # Refresh merged_materials table
+                refresh_merged_materials(conn)
 
         alternative_upload_tasks[task_id] = {
             "status": "completed",
@@ -1289,6 +1369,9 @@ def process_upload_task(task_id: str, content: bytes):
                 WHERE m.material_code = cq.material_code;
                 """
                 conn.execute(text(update_query))
+                
+                # Refresh merged_materials table
+                refresh_merged_materials(conn)
 
         upload_tasks[task_id] = {
             "status": "completed",

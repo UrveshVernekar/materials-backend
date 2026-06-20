@@ -172,6 +172,28 @@ def init_db():
         EXECUTE FUNCTION trigger_set_timestamp();
 
     CREATE INDEX IF NOT EXISTS idx_alternative_material ON alternative_parts (substitute);
+
+    DROP TABLE IF EXISTS merged_materials CASCADE;
+
+    CREATE TABLE IF NOT EXISTS merged_materials (
+        id SERIAL PRIMARY KEY,
+        material_code VARCHAR(50) NOT NULL,
+        material_description TEXT,
+        vendor VARCHAR(200),
+        part_type VARCHAR(50) NOT NULL,          -- 'Master', 'Substitute', 'Independent'
+        master_code VARCHAR(50) DEFAULT NULL,     -- if 'Substitute', this is its master
+        own_stock NUMERIC DEFAULT 0,
+        combined_stock NUMERIC DEFAULT 0,
+        year INT NOT NULL,
+        month INT NOT NULL,
+        own_consumption NUMERIC DEFAULT 0,
+        combined_consumption NUMERIC DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(material_code, year, month)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_merged_materials_code ON merged_materials(material_code);
     -- CREATE INDEX IF NOT EXISTS idx_po_period   ON purchase_orders (year, month, material_code);
     -- CREATE INDEX IF NOT EXISTS idx_po_date     ON purchase_orders (period_date);
 

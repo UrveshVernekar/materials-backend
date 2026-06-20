@@ -31,6 +31,7 @@ def get_table(
     status: str = Query(None),
     min_coverage: float = Query(None),
     max_coverage: float = Query(None),
+    part_type: str = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -39,7 +40,8 @@ def get_table(
         vendor=vendor, 
         status=status,
         min_coverage=min_coverage, 
-        max_coverage=max_coverage
+        max_coverage=max_coverage,
+        part_type=part_type
     )
     return get_dashboard_table(db, filters, user_id=current_user.id)
 
