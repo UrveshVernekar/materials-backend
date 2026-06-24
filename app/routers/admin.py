@@ -1682,11 +1682,19 @@ def process_prediction_task(task_id: str):
                 m1_mes = max(0.0, gpc_stk - m1_pred + m1_po)
 
                 m2_po_suggested = max(0.0, m2_pred - (safety_stock_95 / 2))
-                m2_po = max(m2_po_suggested, lead_time_qty - m1_mes + m2_pred)
+                m2_deficit = lead_time_qty - m1_mes + m2_pred
+                if m2_deficit > 0:
+                    m2_po = max(m2_po_suggested, m2_deficit)
+                else:
+                    m2_po = max(0.0, m2_po_suggested + m2_deficit)
                 m2_mes = max(0.0, m1_mes + m2_po - m2_pred)
 
                 m3_po_suggested = max(0.0, m3_pred - (safety_stock_95 * 0.63))
-                m3_po = max(m3_po_suggested, lead_time_qty - m2_mes + m3_pred)
+                m3_deficit = lead_time_qty - m2_mes + m3_pred
+                if m3_deficit > 0:
+                    m3_po = max(m3_po_suggested, m3_deficit)
+                else:
+                    m3_po = max(0.0, m3_po_suggested + m3_deficit)
                 m3_mes = max(0.0, m2_mes + m3_po - m3_pred)
 
                 # Calculate days equivalent using mean daily demand
