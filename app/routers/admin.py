@@ -1636,6 +1636,11 @@ def process_prediction_task(task_id: str):
 
                 min_lt = float(res['lead_time'].min())
                 max_lt = float((res['lead_time'] + res['delta']).max())
+                
+                print("---------------------------- \n")
+                print(res['lead_time'], res['delta'])
+                print(min_lt, max_lt)
+                print("---------------------------- \n")
 
                 if pd.isna(max_lt):
                     max_lt = min_lt + 5
@@ -1646,23 +1651,40 @@ def process_prediction_task(task_id: str):
                 shape_beta = 1.0 + 4.0 * ((max_lt - most_likely_lt) / (max_lt - min_lt))
 
                 # Vectorized Monte Carlo Simulation
-                simulations = 10000
-                simulated_lts = stats.beta.rvs(shape_alpha, shape_beta, loc=min_lt, scale=max_lt - min_lt, size=simulations)
-                scale_params = np.maximum(0.1, std_daily_demand * np.sqrt(simulated_lts))
-                total_demands = np.random.normal(loc=mean_daily_demand * simulated_lts, scale=scale_params)
-                total_demands = np.maximum(0.0, total_demands)
+                # simulations = 10
+                # simulated_lts = stats.beta.rvs(shape_alpha, shape_beta, 
+                #                                loc=min_lt , 
+                #                                scale=(max_lt - min_lt)*0.5, 
+                #                                size=simulations)
+                
+                # print(f"The simulated lts {simulated_lts} \n")
+                
+                # scale_params = np.maximum(0.1, std_daily_demand * np.sqrt(simulated_lts))
+                # total_demands = np.random.normal(loc=mean_daily_demand * simulated_lts, scale=scale_params)
+                # total_demands = np.maximum(0.0, total_demands)
 
-                df_ltd = pd.Series(total_demands)
-                average_ltd = df_ltd.mean()
-                reorder_point_95 = df_ltd.quantile(0.95)
-                safety_stock_95 = reorder_point_95 - average_ltd
+                # df_ltd = pd.Series(total_demands)
+                # average_ltd = df_ltd.mean()
+                # print(f"The average lead time demand is {average_ltd}")
+                # reorder_point_80 = df_ltd.quantile(0.8)
+                # safety_stock_80 = reorder_point_80 - average_ltd
+                
+                # print(f"The three month safety stock is {safety_stock_80}")
 
-                # Risk-Adjusted forecast
+                # # Risk-Adjusted forecast
+                # print("------Consumption--------------")
+                # print(cons_res)
+                # print(f"Mean = {cons_res.mean(), cons_res.mean()/30.0}")
                 adjusted_monthly_forecast = future_forecast.copy()
-                safety_stock_per_month = safety_stock_95 / len(future_forecast) if len(future_forecast) > 0 else 0.0
-                adjusted_monthly_forecast = adjusted_monthly_forecast + safety_stock_per_month
+                # print("------Adjusted Monthly Forecast -------\n")
+                # print(adjusted_monthly_forecast)
+                # safety_stock_per_month = safety_stock_80 / len(future_forecast) if len(future_forecast) > 0 else 0.0
+                # print("------ Safety Stock Per Month -------\n")
+                # print(safety_stock_per_month )
+                # adjusted_monthly_forecast = adjusted_monthly_forecast + safety_stock_per_month 
 
                 # Reformat future forecast to save in DB
+                safety_stock_95 = 0.0
                 ff_dates = list(adjusted_monthly_forecast.index)
                 ff_vals = list(adjusted_monthly_forecast.values)
 
