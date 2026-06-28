@@ -1651,7 +1651,10 @@ def process_prediction_task(task_id: str):
                     historical_mean_12 * 2
                 )
 
-                lower_bound = 0
+                lower_bound = max(
+                    historical_mean_3 * .65,
+                    historical_mean_12 * .5
+                )
 
                 
                 # Need at least some historical data to split and train
