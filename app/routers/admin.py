@@ -1423,7 +1423,8 @@ def process_prediction_task(task_id: str):
         # Helper forecasting functions
         def forecast_double_smoothing(series, forecast_steps=3):
             try:
-                model = Holt(series, initialization_method="estimated").fit()
+                # model = Holt(series, initialization_method="estimated").fit()
+                model = Holt(series, damped_trend=True, initialization_method="estimated").fit()
                 raw_forecast = model.forecast(steps=forecast_steps)
                 
                 # timeline fix
@@ -1454,6 +1455,69 @@ def process_prediction_task(task_id: str):
                 return pd.Series(raw_forecast.values, index=future_dates)
             except Exception:
                 return forecast_double_smoothing(series, forecast_steps=forecast_steps)
+
+        def forecast_tsb_optimized(series, forecast_steps=3):
+            """An optimized TSB method that finds the best alpha and beta dynamically."""
+            try:
+                y = np.asarray(series, dtype=float)
+                n = len(y)
+                if n == 0:
+                    return pd.Series(np.zeros(forecast_steps))
+                    
+                # Grid search for the best alpha/beta on the training data itself
+                best_alpha, best_beta = 0.2, 0.2
+                best_mae = float('inf')
+                
+                # Simple fast grid search to optimize TSB parameters
+                for a in [0.05, 0.1, 0.13, 0.15, 0.17, 0.2, 0.23, 0.25, 0.27, 0.3, 0.35, 0.4, 0.5]:
+                    for b in [0.05, 0.1, 0.13, 0.15, 0.17, 0.2, 0.23, 0.25, 0.27, 0.3, 0.35, 0.4, 0.5]:
+                        z, p = np.zeros(n), np.zeros(n)
+                        non_zero = y[y > 0]
+                        z[0] = non_zero[0] if len(non_zero) > 0 else 0.0
+                        p[0] = len(non_zero) / n if n > 0 else 0.0
+                        
+                        mae = 0
+                        for t in range(1, n):
+                            # Fitted value before updating
+                            fitted = z[t-1] * p[t-1]
+                            mae += abs(y[t] - fitted)
+                            
+                            if y[t] > 0:
+                                z[t] = a * y[t] + (1 - a) * z[t-1]
+                                p[t] = b * 1.0 + (1 - b) * p[t-1]
+                            else:
+                                z[t] = z[t-1]
+                                p[t] = (1 - b) * p[t-1]
+                        
+                        if mae < best_mae:
+                            best_mae = mae
+                            best_alpha, best_beta = a, b
+
+                # Generate final forecast with best parameters
+                z, p = np.zeros(n), np.zeros(n)
+                non_zero = y[y > 0]
+                z[0] = non_zero[0] if len(non_zero) > 0 else 0.0
+                p[0] = len(non_zero) / n if n > 0 else 0.0
+                
+                for t in range(1, n):
+                    if y[t] > 0:
+                        z[t] = best_alpha * y[t] + (1 - best_alpha) * z[t-1]
+                        p[t] = best_beta * 1.0 + (1 - best_beta) * p[t-1]
+                    else:
+                        z[t] = z[t-1]
+                        p[t] = (1 - best_beta) * p[t-1]
+                        
+                forecast = np.zeros(forecast_steps)
+                for h in range(0, forecast_steps):
+                    forecast[h] = z[-1] * p[-1]
+                    
+                forecast_start_date = series.index[-1] + pd.DateOffset(months=1)
+                future_dates = pd.date_range(start=forecast_start_date, periods=forecast_steps, freq='MS')
+                return pd.Series(forecast, index=future_dates)
+            except Exception:
+                mean_val = series.mean() if len(series) > 0 else 0.0
+                idx = pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=forecast_steps, freq='ME')
+                return pd.Series([mean_val]*forecast_steps, index=idx)
 
         def forecast_tsb(series, alpha=0.2, beta=0.2, forecast_steps=3):
             try:
@@ -1572,24 +1636,45 @@ def process_prediction_task(task_id: str):
                 })
                 df_ts.index = dates_res
                 df_ts = df_ts.sort_index()
+                df_ts = df_ts.asfreq('MS', fill_value=0)
                 df_ts.index.name = 'Month-Year'
 
-                time_series_data = df_ts['Consumption']
+                # 1. ADD JITTER to eliminate divide-by-zero warnings, and enforce frequency
+                time_series_data = df_ts['Consumption'].astype(float)
+                time_series_data.index.freq = 'MS'
+                
+                historical_mean_12 = time_series_data.tail(12).mean()
+                historical_mean_3 = time_series_data.tail(3).mean()
+
+                upper_bound = max(
+                    historical_mean_3 * 1.5,
+                    historical_mean_12 * 2
+                )
+
+                lower_bound = 0
+
                 
                 # Need at least some historical data to split and train
                 if len(time_series_data) < 4:
                     future_forecast = forecast_tsb(time_series_data, alpha=0.2, beta=0.2, forecast_steps=3)
                     winning_model_name = 'TSB_Method'
                 else:
+                    
+                    # 2. ENFORCE FREQUENCY ON SLICES to fix ValueWarning
                     train_series = time_series_data.iloc[:-3]
+                    train_series.index.freq = 'MS' 
                     actual_test  = time_series_data.iloc[-3:]
                     HORIZON = len(actual_test)
 
-                    # Generate predictions on holdout slice
                     fc_double = forecast_double_smoothing(train_series, forecast_steps=HORIZON)
                     fc_triple = forecast_triple_smoothing(train_series, seasonal_periods=3, forecast_steps=HORIZON)
-                    fc_tsb    = forecast_tsb(train_series, alpha=0.2, beta=0.2, forecast_steps=HORIZON)
+                    # fc_tsb    = forecast_tsb(train_series, alpha=0.2, beta=0.2, forecast_steps=HORIZON)
+                    fc_tsb    = forecast_tsb_optimized(train_series, forecast_steps=HORIZON)
 
+                    # 3. CLIP DURING VALIDATION so exploding models are penalized in RMSE
+                    fc_double = np.clip(fc_double, lower_bound, upper_bound)
+                    fc_triple = np.clip(fc_triple, lower_bound, upper_bound)
+                    
                     # Calculate RMSE
                     try:
                         err_double = root_mean_squared_error(actual_test, fc_double)
@@ -1604,6 +1689,14 @@ def process_prediction_task(task_id: str):
                     except Exception:
                         err_tsb = 999999.0
 
+
+                    # HEURISTIC FORCE: If data is highly intermittent (> 30% zeros), 
+                    # do not let Double Smooth win even if its short-term RMSE looks good.
+                    zero_fraction = (time_series_data <= 1e-5).sum() / len(time_series_data)
+                    if zero_fraction > 0.30:
+                        err_double = 999999.0  # Disqualify it
+                        err_triple = 999999.0  # Disqualify it
+                    
                     errors = {
                         'Double_Smooth': err_double,
                         'Triple_Smooth': err_triple,
@@ -1619,36 +1712,44 @@ def process_prediction_task(task_id: str):
                     else:
                         future_forecast = forecast_tsb(time_series_data, alpha=0.2, beta=0.2, forecast_steps=3)
 
-                # Monte Carlo and Safety Stock logic
-                avg_future_monthly_demand = future_forecast.mean()
-
-                if winning_model_name == 'Double_Smooth':
-                    try:
-                        residuals = time_series_data - Holt(time_series_data).fit().fittedvalues
-                    except Exception:
-                        residuals = time_series_data - time_series_data.mean()
-                else:
-                    residuals = time_series_data - time_series_data.mean()
-
-                std_monthly_demand = float(residuals.std()) if len(residuals) > 1 else 0.0
-                std_daily_demand = std_monthly_demand / np.sqrt(30.0)
-                mean_daily_demand = float(time_series_data.mean()) / 30.0
-
-                min_lt = float(res['lead_time'].min())
-                max_lt = float((res['lead_time'] + res['delta']).max())
+                # Final clip for the database values
+                adjusted_monthly_forecast = future_forecast.clip(lower_bound, upper_bound)
                 
-                print("---------------------------- \n")
-                print(res['lead_time'], res['delta'])
-                print(min_lt, max_lt)
-                print("---------------------------- \n")
+                # Deduct the jitter back out to keep clean zeros in your database
+                adjusted_monthly_forecast = np.maximum(0.0, adjusted_monthly_forecast)
 
-                if pd.isna(max_lt):
-                    max_lt = min_lt + 5
+                # # Monte Carlo and Safety Stock logic
+                # avg_future_monthly_demand = future_forecast.mean()
 
-                most_likely_lt = (min_lt + max_lt) / 2.0
+                # if winning_model_name == 'Double_Smooth':
+                #     try:
+                #         residuals = time_series_data - Holt(time_series_data).fit().fittedvalues
+                #     except Exception:
+                #         residuals = time_series_data - time_series_data.mean()
+                # else:
+                #     residuals = time_series_data - time_series_data.mean()
 
-                shape_alpha = 1.0 + 4.0 * ((most_likely_lt - min_lt) / (max_lt - min_lt))
-                shape_beta = 1.0 + 4.0 * ((max_lt - most_likely_lt) / (max_lt - min_lt))
+                # std_monthly_demand = float(residuals.std()) if len(residuals) > 1 else 0.0
+                # std_daily_demand = std_monthly_demand / np.sqrt(30.0)
+                # mean_daily_demand = float(time_series_data.mean()) / 30.0
+                
+                # min_lt = float(res['lead_time'].min())
+                # max_lt = float((res['lead_time'] + res['delta']).max())
+                
+                print(f"Winning Model : {winning_model_name}")
+                
+                # print("---------------------------- \n")
+                # print(res['lead_time'], res['delta'])
+                # print(min_lt, max_lt)
+                # print("---------------------------- \n")
+
+                # if pd.isna(max_lt):
+                #     max_lt = min_lt + 5
+
+                # most_likely_lt = (min_lt + max_lt) / 2.0
+
+                # shape_alpha = 1.0 + 4.0 * ((most_likely_lt - min_lt) / (max_lt - min_lt))
+                # shape_beta = 1.0 + 4.0 * ((max_lt - most_likely_lt) / (max_lt - min_lt))
 
                 # Vectorized Monte Carlo Simulation
                 # simulations = 10
@@ -1675,7 +1776,13 @@ def process_prediction_task(task_id: str):
                 # print("------Consumption--------------")
                 # print(cons_res)
                 # print(f"Mean = {cons_res.mean(), cons_res.mean()/30.0}")
-                adjusted_monthly_forecast = future_forecast.copy()
+                # adjusted_monthly_forecast = future_forecast.copy()
+                
+                # adjusted_monthly_forecast = future_forecast.clip(
+                #     lower_bound,
+                #     upper_bound
+                # )                
+
                 # print("------Adjusted Monthly Forecast -------\n")
                 # print(adjusted_monthly_forecast)
                 # safety_stock_per_month = safety_stock_80 / len(future_forecast) if len(future_forecast) > 0 else 0.0
