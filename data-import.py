@@ -141,9 +141,9 @@ with engine.begin() as conn:
     if not monthly_df.empty:
         monthly_df.to_sql('material_monthly_data', con=conn, if_exists='append', index=False)
 
-    # Update lead_time_qty using the monthly consumption and lead_time values
+    # Update lead_time_qty and cov_in_days using monthly consumption, stock, and lead_time values
     if not materials_df.empty and not monthly_df.empty:
-        print("Calculating and updating lead_time_qty...")
+        print("Calculating and updating lead_time_qty and cov_in_days...")
         update_query = """
         WITH ranked_data AS (
             SELECT
@@ -158,19 +158,37 @@ with engine.begin() as conn:
             JOIN public.materials m
                 ON m.material_code = mmd.material_code
         ),
-        calculated_qty AS (
+        calculated_metrics AS (
             SELECT
                 material_code,
-                (AVG(consumption) / 30) * MAX(lead_time) AS lead_time_qty
+                (AVG(consumption) / 30) * MAX(lead_time) AS lead_time_qty,
+                AVG(consumption) as twelve_m_avg
             FROM ranked_data
             WHERE rn <= 12
             GROUP BY material_code
         )
         UPDATE public.materials m
-        SET lead_time_qty = cq.lead_time_qty
-        FROM calculated_qty cq
-        WHERE m.material_code = cq.material_code;
+        SET 
+            lead_time_qty = cm.lead_time_qty,
+            cov_in_days = CASE
+                WHEN cm.twelve_m_avg > 0 THEN (m.gpc_stk / cm.twelve_m_avg) * 30
+                WHEN m.gpc_stk > 0 THEN 999999
+                ELSE 0
+            END
+        FROM calculated_metrics cm
+        WHERE m.material_code = cm.material_code;
         """
         conn.execute(text(update_query))
+
+        # Set default coverage for any materials that don't have monthly records
+        default_coverage_query = """
+        UPDATE public.materials m
+        SET cov_in_days = CASE WHEN m.gpc_stk > 0 THEN 999999 ELSE 0 END
+        WHERE NOT EXISTS (
+            SELECT 1 FROM public.material_monthly_data mmd 
+            WHERE mmd.material_code = m.material_code
+        );
+        """
+        conn.execute(text(default_coverage_query))
 
 print(f"Inserted {len(materials_df)} materials and {len(monthly_df)} monthly records.")
