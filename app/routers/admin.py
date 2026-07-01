@@ -56,6 +56,27 @@ def refresh_merged_materials(conn):
             (SELECT master_code FROM alternative_parts WHERE substitute = m.material_code AND substitute != master_code) as master_code
         FROM materials m
     ),
+    -- Pre-calculate substitute stock sums grouped by master_code
+    sub_stock_sums AS (
+        SELECT 
+            master_code,
+            SUM(own_stock) as total_sub_stock
+        FROM classified
+        WHERE part_type = 'Substitute'
+        GROUP BY master_code
+    ),
+    -- Pre-calculate substitute monthly consumption sums grouped by master_code and period
+    sub_consumption_sums AS (
+        SELECT 
+            c.master_code,
+            mmd.year,
+            mmd.month,
+            SUM(COALESCE(mmd.consumption, 0)) as total_sub_consumption
+        FROM classified c
+        JOIN material_monthly_data mmd ON c.material_code = mmd.material_code
+        WHERE c.part_type = 'Substitute'
+        GROUP BY c.master_code, mmd.year, mmd.month
+    ),
     -- Cross-join all materials with all periods
     material_periods AS (
         SELECT 
@@ -90,22 +111,24 @@ def refresh_merged_materials(conn):
         m.part_type,
         m.master_code,
         m.own_stock,
-        -- combined stock calculation
+        -- combined stock calculation using LEFT JOIN to sub_stock_sums
         CASE 
             WHEN m.part_type = 'Master' THEN 
-                m.own_stock + COALESCE((SELECT SUM(own_stock) FROM classified WHERE master_code = m.material_code), 0)
+                m.own_stock + COALESCE(ss.total_sub_stock, 0)
             ELSE m.own_stock
         END as combined_stock,
         m.year,
         m.month,
         m.own_consumption,
-        -- combined consumption calculation
+        -- combined consumption calculation using LEFT JOIN to sub_consumption_sums
         CASE 
             WHEN m.part_type = 'Master' THEN 
-                m.own_consumption + COALESCE((SELECT SUM(own_consumption) FROM monthly_data_mapped WHERE master_code = m.material_code AND year = m.year AND month = m.month), 0)
+                m.own_consumption + COALESCE(sc.total_sub_consumption, 0)
             ELSE m.own_consumption
         END as combined_consumption
-    FROM monthly_data_mapped m;
+    FROM monthly_data_mapped m
+    LEFT JOIN sub_stock_sums ss ON m.material_code = ss.master_code AND m.part_type = 'Master'
+    LEFT JOIN sub_consumption_sums sc ON m.material_code = sc.master_code AND m.year = sc.year AND m.month = sc.month AND m.part_type = 'Master';
     """
     conn.execute(text(query))
 
@@ -449,14 +472,15 @@ for db_col, aliases in ALTERNATIVE_SCHEMA_FIELDS.items():
 # =========================================================
 # COLUMN MATCHER
 # =========================================================
-def find_best_match(excel_col):
+def find_best_match(excel_col, excel_embedding=None):
 
     normalized_excel = normalize_column(excel_col)
 
     best_score = 0
     best_field = None
 
-    excel_embedding = embedding_model.encode([normalized_excel])[0]
+    if excel_embedding is None:
+        excel_embedding = embedding_model.encode([normalized_excel])[0]
 
     for db_col, aliases in SCHEMA_FIELDS.items():
 
@@ -507,11 +531,12 @@ def find_best_match(excel_col):
     return best_field, best_score
 
 
-def find_best_match_po(excel_col):
+def find_best_match_po(excel_col, excel_embedding=None):
     normalized_excel = normalize_column(excel_col)
     best_score = 0
     best_field = None
-    excel_embedding = embedding_model.encode([normalized_excel])[0]
+    if excel_embedding is None:
+        excel_embedding = embedding_model.encode([normalized_excel])[0]
 
     for db_col, aliases in PO_SCHEMA_FIELDS.items():
         # EXACT MATCH BOOST
@@ -546,19 +571,20 @@ def find_best_match_po(excel_col):
     return best_field, best_score
 
 
-def find_best_matches(excel_col, SCHEMA_WITH_FIELDS):
+def find_best_matches(excel_col, SCHEMA_WITH_FIELDS, excel_embedding=None, cached_embeddings=None):
 
     normalized_excel = normalize_column(excel_col)
 
     best_score = 0
     best_field = None
 
-    excel_embedding = embedding_model.encode([normalized_excel])[0]
+    if excel_embedding is None:
+        excel_embedding = embedding_model.encode([normalized_excel])[0]
     
-    local_schema_embeddings = {}
-
-    for db_col, aliases in SCHEMA_WITH_FIELDS.items():
-        local_schema_embeddings[db_col] = embedding_model.encode(aliases)
+    if cached_embeddings is None:
+        cached_embeddings = {}
+        for db_col, aliases in SCHEMA_WITH_FIELDS.items():
+            cached_embeddings[db_col] = embedding_model.encode(aliases)
 
     for db_col, aliases in SCHEMA_WITH_FIELDS.items():
 
@@ -589,7 +615,7 @@ def find_best_matches(excel_col, SCHEMA_WITH_FIELDS):
         
         semantic_scores = cosine_similarity(
             [excel_embedding],
-            local_schema_embeddings[db_col]
+            cached_embeddings[db_col]
         )[0]
 
         semantic_score = max(semantic_scores) * 100
@@ -763,23 +789,30 @@ def process_alternative_upload_task(task_id: str, content: bytes):
         column_mapping = {}
         schema_field_scores = {}
 
-        for col in df.columns:
-            if col.startswith("Unnamed_"):
-                continue
-
-            best_field, score = find_best_matches(col, ALTERNATIVE_SCHEMA_FIELDS)
-            if score >= 65:
-                # Prevent duplicate mapping by keeping only highest score
-                if best_field in schema_field_scores:
-                    if score > schema_field_scores[best_field]:
-                        keys_to_remove = [k for k, v in column_mapping.items() if v == best_field]
-                        for k in keys_to_remove:
-                            del column_mapping[k]
+        cols_to_match = [col for col in df.columns if not str(col).startswith("Unnamed_")]
+        if cols_to_match:
+            normalized_cols = [normalize_column(col) for col in cols_to_match]
+            col_embeddings = embedding_model.encode(normalized_cols)
+            
+            for col, excel_embedding in zip(cols_to_match, col_embeddings):
+                best_field, score = find_best_matches(
+                    col, 
+                    ALTERNATIVE_SCHEMA_FIELDS, 
+                    excel_embedding=excel_embedding, 
+                    cached_embeddings=alternative_schema_embeddings
+                )
+                if score >= 65:
+                    # Prevent duplicate mapping by keeping only highest score
+                    if best_field in schema_field_scores:
+                        if score > schema_field_scores[best_field]:
+                            keys_to_remove = [k for k, v in column_mapping.items() if v == best_field]
+                            for k in keys_to_remove:
+                                del column_mapping[k]
+                            column_mapping[col] = best_field
+                            schema_field_scores[best_field] = score
+                    else:
                         column_mapping[col] = best_field
                         schema_field_scores[best_field] = score
-                else:
-                    column_mapping[col] = best_field
-                    schema_field_scores[best_field] = score
 
         # Check required columns
         required_fields = ["master_code", "master_mat_desc", "substitute", "substitute_mat_desc"]
@@ -929,23 +962,25 @@ def process_po_upload_task(task_id: str, content: bytes):
         column_mapping = {}
         schema_field_scores = {}
 
-        for col in df.columns:
-            if col.startswith("Unnamed_"):
-                continue
-
-            best_field, score = find_best_match_po(col)
-            if score >= 65:
-                # Prevent duplicate mapping by keeping only highest score
-                if best_field in schema_field_scores:
-                    if score > schema_field_scores[best_field]:
-                        keys_to_remove = [k for k, v in column_mapping.items() if v == best_field]
-                        for k in keys_to_remove:
-                            del column_mapping[k]
+        cols_to_match = [col for col in df.columns if not str(col).startswith("Unnamed_")]
+        if cols_to_match:
+            normalized_cols = [normalize_column(col) for col in cols_to_match]
+            col_embeddings = embedding_model.encode(normalized_cols)
+            
+            for col, excel_embedding in zip(cols_to_match, col_embeddings):
+                best_field, score = find_best_match_po(col, excel_embedding=excel_embedding)
+                if score >= 65:
+                    # Prevent duplicate mapping by keeping only highest score
+                    if best_field in schema_field_scores:
+                        if score > schema_field_scores[best_field]:
+                            keys_to_remove = [k for k, v in column_mapping.items() if v == best_field]
+                            for k in keys_to_remove:
+                                del column_mapping[k]
+                            column_mapping[col] = best_field
+                            schema_field_scores[best_field] = score
+                    else:
                         column_mapping[col] = best_field
                         schema_field_scores[best_field] = score
-                else:
-                    column_mapping[col] = best_field
-                    schema_field_scores[best_field] = score
 
         # Check required columns
         required_fields = ["material_code", "po_number", "order_qty", "year", "month"]
@@ -1191,28 +1226,28 @@ def process_upload_task(task_id: str, content: bytes):
         column_mapping = {}
         schema_field_scores = {}
 
-        for col in df.columns:
-            if col in monthly_cols or col.startswith("Unnamed_"):
-                continue
-
-            best_field, score = find_best_match(col)
-
-            print(f"{col} --> {best_field} ({score:.2f})")
-
-            if score >= 65:
-                # PREVENT DUPLICATE MAPPINGBY KEEPING ONLY THE HIGHEST SCORE
-                if best_field in schema_field_scores:
-                    if score > schema_field_scores[best_field]:
-                        # REMOVE THE PREVIOUS LOWER-SCORING MATCH
-                        keys_to_remove = [k for k, v in column_mapping.items() if v == best_field]
-                        for k in keys_to_remove:
-                            del column_mapping[k]
-                        
+        cols_to_match = [col for col in df.columns if col not in monthly_cols and not str(col).startswith("Unnamed_")]
+        if cols_to_match:
+            normalized_cols = [normalize_column(col) for col in cols_to_match]
+            col_embeddings = embedding_model.encode(normalized_cols)
+            
+            for col, excel_embedding in zip(cols_to_match, col_embeddings):
+                best_field, score = find_best_match(col, excel_embedding=excel_embedding)
+                print(f"{col} --> {best_field} ({score:.2f})")
+                if score >= 65:
+                    # PREVENT DUPLICATE MAPPING BY KEEPING ONLY THE HIGHEST SCORE
+                    if best_field in schema_field_scores:
+                        if score > schema_field_scores[best_field]:
+                            # REMOVE THE PREVIOUS LOWER-SCORING MATCH
+                            keys_to_remove = [k for k, v in column_mapping.items() if v == best_field]
+                            for k in keys_to_remove:
+                                del column_mapping[k]
+                            
+                            column_mapping[col] = best_field
+                            schema_field_scores[best_field] = score
+                    else:
                         column_mapping[col] = best_field
                         schema_field_scores[best_field] = score
-                else:
-                    column_mapping[col] = best_field
-                    schema_field_scores[best_field] = score
 
         # =====================================================
         # MATERIALS DATAFRAME
